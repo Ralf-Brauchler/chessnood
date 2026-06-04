@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chessnood"
+version = "0.1.0"
+description = "Headless, senior-friendly chess computer for the Chessnut Pro e-board on a Raspberry Pi"
+requires-python = ">=3.11"
+dependencies = [
+    "chess>=1.10",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# Bluetooth LE support (needed on the real board, works on macOS/Linux/Windows).
+ble = ["bleak>=0.21"]
+# Raspberry Pi GPIO (buttons + status LED). Only installable on a Pi.
+pi = ["gpiozero>=2.0", "rpi-lgpio>=0.6"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+chessnood = "chessnood.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,28 @@
+# chessnood configuration.
+# Copy to config.yaml and edit. The running service watches this file and
+# reloads engine settings live (no restart needed) at the start of each turn.
+
+engine:
+  path: stockfish        # path to a UCI engine binary (Stockfish recommended)
+  skill_level: 5         # 0-20. Lower = weaker / more "human". Good start for a casual player.
+  move_time_ms: 800      # how long the computer is allowed to think per move
+  elo_limit: null        # set e.g. 1200 to cap strength by Elo (uses UCI_LimitStrength)
+  threads: 1             # keep at 1 on a 1 GB Pi
+  hash_mb: 32            # engine hash table; keep small on a 1 GB Pi
+
+board:
+  backend: ble           # ble = real board over Bluetooth | mock = no hardware (for testing)
+  address: null          # optional fixed BLE address/UUID. null = auto-discover by name
+  name_prefix: Chessnut  # advertised-name prefix used during auto-discovery
+
+game:
+  human_color: white     # which colour your father plays: white | black
+
+hardware:
+  status_led_pin: 17     # BCM pin for the Bluetooth status LED (null to disable)
+  buttons:
+    new_game_pin: 27     # BCM pin for the "New game" button (null to disable)
+    resign_pin: 22       # BCM pin for an optional "Resign" button (null to disable)
+
+log_level: info          # debug | info | warning | error
+status_file: ./chessnood-status.json   # `chessnood status` reads this file

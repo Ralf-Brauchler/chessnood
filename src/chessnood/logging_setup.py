@@ -1,0 +1,12 @@
+"""Logging configuration. Plain stderr output works directly with journald."""
+from __future__ import annotations
+
+import logging
+
+
+def setup_logging(level: str = "info") -> None:
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )

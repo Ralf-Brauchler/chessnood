@@ -1,0 +1,16 @@
+[Unit]
+Description=chessnood headless chess computer
+After=bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/chessnood
+ExecStart=/home/pi/chessnood/.venv/bin/chessnood run -c /home/pi/chessnood/config.yaml
+Restart=always
+RestartSec=3
+# Logs go to the journal: view with `journalctl -fu chessnood`
+
+[Install]
+WantedBy=multi-user.target
