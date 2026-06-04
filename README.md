@@ -12,6 +12,14 @@ background, so the player never sees a "connect" button.
 > today and are tested in simulation. The Chessnut **BLE protocol is implemented
 > but not yet verified on real hardware** — see [docs/HARDWARE.md](docs/HARDWARE.md).
 
+## Requirements
+
+- Python 3.11+
+- A [Chessnut](https://www.chessnutech.com/) e-board with Bluetooth LE (developed against the **Pro**)
+- For deployment: a Raspberry Pi (4 recommended; 1 GB RAM is enough for this headless setup), Raspberry Pi OS
+- Optional but recommended: [Stockfish](https://stockfishchess.org/) as the opponent (`apt install stockfish`); without it the engine falls back to random legal moves
+- Optional GPIO hardware: one LED (connection status) + 1–2 momentary buttons (new game / resign)
+
 ## Try it now (no hardware, no Stockfish needed)
 
 ```
@@ -60,3 +68,19 @@ confirm the protocol and LED control, then adjust the flagged constants if neede
 ```
 chessnood scan      # find the board
 ```
+
+## Credits
+
+The Chessnut BLE protocol implementation is based on the public documentation and
+the reverse-engineering work of the community, in particular:
+
+- [chessnutech/EasyLinkSDK](https://github.com/chessnutech/EasyLinkSDK) — the official SDK
+- [ecrucru/chessnut-connector](https://github.com/ecrucru/chessnut-connector)
+- [rmarabini/chessnutair](https://github.com/rmarabini/chessnutair)
+- [staubsauger/ChessnutPy](https://github.com/staubsauger/ChessnutPy)
+
+Chess rules via [python-chess](https://github.com/niklasf/python-chess); opponent via [Stockfish](https://stockfishchess.org/).
+
+## License
+
+[MIT](LICENSE) © 2026 Ralf Brauchler
