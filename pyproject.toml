@@ -13,10 +13,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# USB-HID support (primary transport to the real board; works on macOS/Linux/Windows).
+# USB-HID support (transport to the real board; works on macOS/Linux/Windows).
 usb = ["hidapi>=0.14"]
-# Bluetooth LE support (legacy/optional alternative transport).
-ble = ["bleak>=0.21"]
 # Screen rendering (and the `preview` command). Works anywhere.
 display = ["Pillow>=10.1"]
 # Raspberry Pi: USB board + framebuffer screen + touch input. evdev only installs on Linux.

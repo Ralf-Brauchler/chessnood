@@ -2,7 +2,7 @@
 
   chessnood run        run the service against the real board (or mock)
   chessnood simulate   play a full game with no hardware (proves the logic)
-  chessnood scan       list nearby BLE devices (first hardware test)
+  chessnood scan       list attached Chessnut USB boards (first hardware test)
   chessnood status     print what a running service is doing
   chessnood preview    render the touchscreen to a PNG to see how it looks
 """
@@ -81,25 +81,23 @@ def cmd_simulate(args: argparse.Namespace) -> int:
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
-    """List nearby BLE devices. Run this with the board on to find it."""
+    """List attached Chessnut USB boards. Run this with the board plugged in."""
     try:
-        from bleak import BleakScanner
+        from .boards.usb import list_devices
     except ImportError:
-        print("bleak not installed. Run:  pip install 'chessnood[ble]'", file=sys.stderr)
+        print("hidapi not installed. Run:  pip install 'chessnood[usb]'", file=sys.stderr)
         return 1
-
-    async def _scan() -> int:
-        print(f"Scanning for {args.timeout}s ...\n")
-        devices = await BleakScanner.discover(timeout=args.timeout)
-        if not devices:
-            print("No BLE devices found.")
-            return 1
-        for d in sorted(devices, key=lambda x: (x.name or "~")):
-            mark = "  <-- likely Chessnut" if (d.name or "").lower().startswith("chessnut") else ""
-            print(f"  {d.address}  {d.name or '(no name)'}{mark}")
-        return 0
-
-    return asyncio.run(_scan())
+    try:
+        boards = list_devices()
+    except Exception as exc:  # noqa: BLE001 - hidapi/permission issues
+        print(f"Could not enumerate USB devices: {exc}", file=sys.stderr)
+        return 1
+    if not boards:
+        print("No Chessnut USB board found. Is it plugged in and powered on?")
+        return 1
+    for desc, _pid in boards:
+        print(f"  {desc}")
+    return 0
 
 
 def cmd_preview(args: argparse.Namespace) -> int:
@@ -161,9 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     p_sim.add_argument("--max-plies", type=int, default=200)
     p_sim.set_defaults(func=cmd_simulate)
 
-    p_scan = sub.add_parser("scan", help="list nearby BLE devices")
-    p_scan.add_argument("--timeout", type=float, default=10.0)
-    p_scan.set_defaults(func=cmd_scan)
+    sub.add_parser("scan", help="list attached Chessnut USB boards").set_defaults(func=cmd_scan)
 
     p_prev = sub.add_parser("preview", help="render the touchscreen to a PNG")
     p_prev.add_argument("--out", default="./chessnood-preview.png")

@@ -1,7 +1,8 @@
-# udev rule granting non-root access to the Chessnut board over USB.
-# Only needed if you later switch to a wired USB connection on the Pi.
-# Install:  sudo cp scripts/99-chessnut.rules /etc/udev/rules.d/ && sudo udevadm control --reload
+# udev rule granting non-root access to the Chessnut board over USB (hidraw).
+# Install:  sudo cp scripts/99-chessnut.rules /etc/udev/rules.d/ \
+#           && sudo udevadm control --reload && sudo udevadm trigger
 #
-# Vendor ID 2d99 = Chessnut. Product IDs: Air 80xx, Pro 81xx, Air+ 82xx, Evo 83xx, Go 85xx.
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2d99", MODE="0660", GROUP="plugdev"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="2d99", MODE="0660", GROUP="plugdev"
+# Vendor ID 2d80 = Chessnut (per EasyLinkSDK). Product IDs: Air 80xx, Pro 81xx,
+# Air+ 82xx, Evo 83xx, Go 85xx.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2d80", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2d80", MODE="0660", GROUP="plugdev"

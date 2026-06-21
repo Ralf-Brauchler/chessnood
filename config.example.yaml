@@ -11,9 +11,7 @@ engine:
   hash_mb: 32            # engine hash table; keep small on a 1 GB Pi
 
 board:
-  backend: ble           # ble = real board over Bluetooth | mock = no hardware (for testing)
-  address: null          # optional fixed BLE address/UUID. null = auto-discover by name
-  name_prefix: Chessnut  # advertised-name prefix used during auto-discovery
+  backend: usb           # usb = real board over USB cable | mock = no hardware (for testing)
 
 game:
   human_color: white     # which colour your father plays: white | black

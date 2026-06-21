@@ -16,8 +16,4 @@ def build_board(cfg: BoardConfig) -> Board:
         from .usb import UsbBoard  # imported lazily so hidapi stays optional
 
         return UsbBoard()
-    if cfg.backend == "ble":
-        from .ble import BleBoard  # imported lazily so bleak stays optional
-
-        return BleBoard(address=cfg.address, name_prefix=cfg.name_prefix)
     raise ValueError(f"unknown board backend: {cfg.backend!r}")

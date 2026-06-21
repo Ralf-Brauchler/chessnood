@@ -7,12 +7,15 @@ The board's own LEDs are the **primary move display** (the lit squares show the
 computer's move — no notation to read). A small screen shows calm, plain-language
 status ("Du bist am Zug", "Computer denkt …"). To start a fresh game the player
 simply puts all the pieces back in the starting position — no buttons to find.
-Everything else — strength, debugging — happens over SSH. The Bluetooth connection
-reconnects silently in the background, so the player never sees a "connect" button.
+Everything else — strength, debugging — happens over SSH. The board connects to
+the Pi by **USB cable** — no pairing, ever, and it stays powered over the same
+cable, so the player never sees a "connect" button.
 
 > **Status: scaffold.** The full game logic, engine, config, service and CLI work
-> today and are tested in simulation. The Chessnut **BLE protocol is implemented
-> but not yet verified on real hardware** — see [docs/HARDWARE.md](docs/HARDWARE.md).
+> today and are tested in simulation. The board talks to the Pi over **USB-HID**
+> (a port of the official EasyLinkSDK, which uses USB for both reading the
+> position and lighting the LEDs); this is **not yet verified on a physical
+> Chessnut Pro** — see [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ## How the player uses it (the whole interaction)
 
@@ -35,7 +38,7 @@ Black is set there too — as Black, the computer moves first right after setup.
 ## Requirements
 
 - Python 3.11+
-- A [Chessnut](https://www.chessnutech.com/) e-board with Bluetooth LE (developed against the **Pro**)
+- A [Chessnut](https://www.chessnutech.com/) e-board connected by **USB** (developed against the **Pro**), plus a USB-A-to-USB-C cable to the Pi
 - For deployment: a Raspberry Pi (4 recommended; 1 GB RAM is enough), Raspberry Pi OS
 - A 3.5" SPI screen (developed against the **MHS-3.5**, ILI9486) for plain-language status
 - Optional but recommended: [Stockfish](https://stockfishchess.org/) as the opponent (`apt install stockfish`); without it the engine falls back to random legal moves
@@ -55,7 +58,7 @@ python3 -m venv .venv
 ## How it fits together
 
 ```
- [Chessnut Pro] --BLE--> boards/ble.py  ---reading--->  game.py (pure state machine)
+ [Chessnut Pro] --USB--> boards/usb.py  ---reading--->  game.py (pure state machine)
  [3.5" screen]  <------- display.py                          |  detects the move played,
                                                              |  asks the engine to reply,
                                                              v  lights from/to LEDs on the board
@@ -66,7 +69,7 @@ python3 -m venv .venv
 
 - `game.py` — pure, I/O-free state machine (fully unit-tested); a new game starts when the pieces are reset to the start position
 - `runner.py` — async glue: board ↔ game ↔ engine ↔ LEDs ↔ screen, auto-reconnect, live config reload
-- `boards/` — `mock` (testing) and `ble` (real board); a `usb` backend can be added later
+- `boards/` — `mock` (testing) and `usb` (real board, USB-HID); the git history holds a removed `ble` backend if a wireless path is ever wanted
 - `display.py` — status screen: plain-language state + a visual board; pure-Pillow render, framebuffer/console/preview backends
 - `engine.py` — Stockfish over UCI, with a random-mover fallback
 - `config.py` — YAML config, hot-reloaded between moves
@@ -85,22 +88,21 @@ journalctl -fu chessnood
 ## Next step
 
 Run the [hardware verification checklist](docs/HARDWARE.md) once the board is
-reachable (works from any Mac/Linux laptop with Bluetooth — no Pi required) to
-confirm the protocol and LED control, then adjust the flagged constants if needed.
+plugged in (works from any Mac/Linux laptop — no Pi required) to confirm reading
+the position and LED control, then adjust any flagged constants if needed.
 ```
-chessnood scan      # find the board
+chessnood scan      # list attached Chessnut USB boards
 ```
 
 ## Credits
 
-The Chessnut BLE protocol implementation is based on the public documentation and
-the reverse-engineering work of the community, in particular:
+The Chessnut USB-HID implementation in `boards/usb.py` is a port of the official
+SDK; the protocol was also cross-checked against community libraries:
 
-- [chessnutech/EasyLinkSDK](https://github.com/chessnutech/EasyLinkSDK) — the official SDK
-- [ecrucru/chessnut-connector](https://github.com/ecrucru/chessnut-connector)
-- [rmarabini/chessnutair](https://github.com/rmarabini/chessnutair) — confirmed our UUIDs, init/LED commands and piece-code map
+- [chessnutech/EasyLinkSDK](https://github.com/chessnutech/EasyLinkSDK) — the official SDK; our USB device IDs, commands, board decode and LED layout are ported from it
+- [rmarabini/chessnutair](https://github.com/rmarabini/chessnutair) — confirmed the init/LED commands and piece-code map
 - [paulvonallwoerden/chessnut-air](https://github.com/paulvonallwoerden/chessnut-air) — confirmed the LED bit/byte layout
-- [staubsauger/ChessnutPy](https://github.com/staubsauger/ChessnutPy)
+- [ecrucru/chessnut-connector](https://github.com/ecrucru/chessnut-connector), [staubsauger/ChessnutPy](https://github.com/staubsauger/ChessnutPy)
 
 Chess rules via [python-chess](https://github.com/niklasf/python-chess); opponent via [Stockfish](https://stockfishchess.org/).
 

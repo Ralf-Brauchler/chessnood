@@ -1,71 +1,67 @@
-# Hardware verification (do this once, when the board is reachable)
+# Hardware verification (do this once, when the board is plugged in)
 
-The Bluetooth protocol in `src/chessnood/boards/protocol.py` has been **cross-checked
-against several community libraries** for the Chessnut **Air** (rmarabini/chessnutair,
-paulvonallwoerden/chessnut-air, chessnutech/EasyLinkSDK, ecrucru/chessnut-connector).
-The UUIDs, the init command, the LED command (header `0x0A 0x08` + 8 rank bytes,
-file a = high bit) and the 32-byte board payload + piece-code map all agree across
-implementations, so they are now treated as confirmed. What remains genuinely
-unverified on a physical **Pro** is only:
-  * the board's square **orientation** (rotation / file-rank origin), and
-  * whether the **Pro** exposes LED control over BLE at all (the references are
-    mostly for the Air, which shares the protocol).
+`boards/usb.py` is a port of the official `chessnutech/EasyLinkSDK`, which reads
+the board and lights the LEDs over **USB-HID** — the only transport the vendor
+confirms for the Chessnut **Pro** (their docs note BLE "seems not to work yet").
+The device IDs, the realtime command, the board decode and the LED command are
+taken verbatim from the SDK, so this is high-confidence; this checklist confirms
+it on a physical Pro and tells you what to tweak if anything is off. You can run
+all of it from a **Mac or Linux laptop** — no Pi needed.
 
-This checklist confirms those on real hardware and tells you exactly what to tweak.
-You can run all of this from a **Mac or Linux laptop** with Bluetooth — no Pi needed.
-
-## 0. Install the BLE extra
+## 0. Install the USB extra
 
 ```
-pip install -e '.[ble]'
+pip install -e '.[usb]'
 ```
+
+On Linux you also need access to the hidraw device (see step 1).
 
 ## 1. Find the board
 
-Turn the board on, then:
+Plug the board into the computer with a USB cable and turn it on, then:
 
 ```
 chessnood scan
 ```
 
-Expect a line like `... Chessnut Pro  <-- likely Chessnut`. Note the address.
-If nothing shows up: the board may need to be woken (move a piece) or isn't
-advertising — check it's not already connected to a phone.
+Expect a line like `Chessnut Pro (pid 0x8100)`. If nothing shows up:
+
+- **Linux permissions:** raw HID needs a udev rule. `scripts/99-chessnut.rules`
+  grants access — install it (`sudo cp scripts/99-chessnut.rules /etc/udev/rules.d/
+  && sudo udevadm control --reload && sudo udevadm trigger`) and replug. Until
+  then you can test with `sudo`.
+- Check the cable is a **data** cable and the board is powered on.
 
 ## 2. Confirm board decoding
 
-Set `board.backend: ble` (and optionally `board.address:` to the value from step 1)
-in `config.yaml`, then run `chessnood run` with `log_level: debug`.
+Set `board.backend: usb` in `config.yaml` and run `chessnood run` with
+`log_level: debug`. Set the pieces to the **standard starting position** and watch
+the log. Success = the decoded position matches the real board.
 
-Set the pieces to the **standard starting position** and watch the log. Add a
-tiny debug print of the decoded `piece_map` if needed. Success = the decoded
-position matches the real board.
+**If the decoded position is scrambled**, the fix is in `boards/usb.py`:
 
-**If the decoded position is scrambled**, the fix is one of these constants in
-`protocol.py` (each marked `# VERIFY`):
-
-| Symptom | Constant to adjust |
+| Symptom | What to adjust |
 |---|---|
-| Board mirrored / rotated | `stream_index_to_square()` ordering |
-| Two squares per byte swapped | nibble order in `decode_board()` |
-| Wrong piece types | `_CODE_TO_SYMBOL` mapping |
-| Whole board offset | `DATA_OFFSET` / `DATA_LEN` |
+| Board mirrored / rotated | the square mapping in `decode_board_report()` (`7 - j`, `7 - i`) |
+| Wrong piece types | `_CHESS_PIECES` |
+| Nothing decodes at all | the report framing (`REPORT_BOARD`, `BOARD_DATA_OFFSET`) |
 
-## 3. Confirm LED control  ← the biggest open question
+## 3. Confirm LED control  ← the make-or-break check
 
-While connected, light a known square. The cleanest check: it's the computer's
-turn in a game and the from/to LEDs should light. If LEDs **don't** light or the
-**wrong** squares light:
+It's the computer's turn in a game, so the from/to LEDs should light on the board.
+The LED bytes are ported verbatim from the SDK, so this is expected to work. If
+LEDs **don't** light or the **wrong** squares light:
 
-- adjust `LED_COMMAND`, or the bit order in `encode_leds()` (`# VERIFY`).
-- If the Pro turns out not to expose LED control over BLE at all, fall back to an
-  audible cue (a small buzzer on a GPIO pin) instead of board LEDs — the game
-  logic is unaffected; only the "show the computer's move" step changes.
+- The most likely culprit is the HID **report-ID prefix** in `UsbBoard._write()`
+  (it prepends `0x00`; some setups want the raw bytes with no prefix) — this is
+  flagged `# VERIFY`. Try removing the prefix.
+- Wrong squares → the bit/byte mapping in `encode_leds()` (`# VERIFY`).
 
-## 4. (Optional, later) USB instead of Bluetooth
+This is the single feature the whole project depends on (the player reads the
+board LEDs, not the screen), so verify it deliberately.
 
-The board is a USB-HID device (Pro product IDs `0x81xx`, vendor `0x2d99` — **verify**
-with `lsusb`). USB is rock-solid on a Pi (no pairing) but the Linux USB path is
-less proven than BLE; treat it as a later enhancement. The udev rule in
-`scripts/99-chessnut.rules` grants access; a USB backend would live in
-`boards/usb.py` alongside the BLE one.
+## Reference
+
+Device VID `0x2d80`, Pro PID `0x81xx`, HID usage page `0xFF00`. Commands:
+realtime `21 01 00`, LEDs `0A 08` + 8 rank bytes, beep `0B 04 …`, battery
+`29 01 00`. All from EasyLinkSDK `sdk/EasyLink.cpp`.

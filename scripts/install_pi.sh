@@ -4,18 +4,22 @@ set -euo pipefail
 
 echo ">> Installing system packages..."
 sudo apt-get update
-# python3-dev + build-essential: needed to build the 'evdev' wheel (in .[pi])
-# fonts-dejavu-core: a TrueType font so the screen can render umlauts
+# python3-dev + build-essential: build the 'hidapi'/'evdev' wheels (in .[pi])
+# libhidapi-hidraw0: runtime lib for USB-HID; fonts-dejavu-core: screen umlauts
 sudo apt-get install -y python3-venv python3-pip python3-dev build-essential \
-    fonts-dejavu-core stockfish bluez
+    libhidapi-hidraw0 libhidapi-dev fonts-dejavu-core stockfish
 
 echo ">> Creating virtualenv and installing chessnood..."
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install -e '.[ble,pi]'
+.venv/bin/pip install -e '.[pi]'   # includes hidapi (USB board), Pillow, evdev
 
 echo ">> Installing config (edit config.yaml afterwards)..."
 [ -f config.yaml ] || cp config.example.yaml config.yaml
+
+echo ">> Installing udev rule for USB board access..."
+sudo cp scripts/99-chessnut.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
 
 echo ">> Installing systemd service..."
 sudo cp systemd/chessnood.service /etc/systemd/system/chessnood.service

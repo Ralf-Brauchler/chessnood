@@ -1,9 +1,10 @@
 # Raspberry Pi setup
 
 Target: Raspberry Pi 4 (1 GB is enough), Raspberry Pi OS (64-bit) + a 3.5" SPI
-screen (MHS-3.5). The **board LEDs are the primary move display**; the screen
-shows plain-language status. A new game starts by resetting the pieces to the
-start position (no button/touch); SSH is for setup and tuning.
+screen (MHS-3.5). The board connects to the Pi by **USB cable**. The **board LEDs
+are the primary move display**; the screen shows plain-language status. A new game
+starts by resetting the pieces to the start position (no button/touch); SSH is for
+setup and tuning.
 
 ## 1. Flash the SD card
 
@@ -63,17 +64,32 @@ no touch or button is needed.
 console is visible on `/dev/fb0`. To hide it from the player, add `fbcon=map:2` to
 `/boot/firmware/cmdline.txt` and enable the chessnood service to autostart.
 
-## 4. Day-to-day (over SSH)
+## 4. The board (USB)
+
+Connect the Chessnut Pro to a Pi USB-A port with a USB-A-to-USB-C cable. The board
+is a USB-HID peripheral (the Pi is the host); it stays powered over the same cable,
+so no charging step and no pairing. Install the udev rule for non-root access:
+
+```
+sudo cp scripts/99-chessnut.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+Then `chessnood scan` should list the board (e.g. `Chessnut Pro (pid 0x8100)`).
+If the Pi reports USB undervoltage (`vcgencmd get_throttled` != 0x0), use a good
+3A Pi PSU or a powered USB hub.
+
+## 5. Day-to-day (over SSH)
 
 ```
 journalctl -fu chessnood        # live logs incl. connection state
 chessnood status                # quick snapshot (connection, state, skill)
 nano config.yaml                # change skill_level / move_time — applied next move, no restart
-chessnood scan                  # list BLE devices if the board won't connect
+chessnood scan                  # list attached Chessnut USB boards
 sudo systemctl restart chessnood
 ```
 
-## 5. Adjusting strength
+## 6. Adjusting strength
 
 In `config.yaml` under `engine:`:
 - `skill_level: 0..20` — quickest knob; lower is weaker.

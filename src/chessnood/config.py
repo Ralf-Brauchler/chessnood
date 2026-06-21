@@ -26,9 +26,7 @@ class EngineConfig:
 
 @dataclass
 class BoardConfig:
-    backend: str = "usb"  # "usb" | "ble" | "mock"
-    address: str | None = None       # BLE only: fixed address/UUID
-    name_prefix: str = "Chessnut"    # BLE only: advertised-name prefix
+    backend: str = "usb"  # "usb" | "mock"
 
 
 @dataclass
