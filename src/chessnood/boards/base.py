@@ -82,3 +82,7 @@ class Board(ABC):
 
     async def clear_leds(self) -> None:
         await self.set_leds([])
+
+    async def beep(self, frequency_hz: int = 1000, duration_ms: int = 150) -> None:
+        """Sound a short tone, if the board supports it. No-op by default."""
+        return None

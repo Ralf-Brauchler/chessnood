@@ -58,7 +58,16 @@ LEDs **don't** light or the **wrong** squares light:
 - Wrong squares → the bit/byte mapping in `encode_leds()` (`# VERIFY`).
 
 This is the single feature the whole project depends on (the player reads the
-board LEDs, not the screen), so verify it deliberately.
+board LEDs, not the screen), so verify it deliberately. The runner lights the
+guidance squares here too (wrong squares in "fix" mode, king+rook for castling,
+the captured pawn for en passant) — confirm those light as expected.
+
+## 4. (Optional) Confirm the beep
+
+The board has a beep command (`0B 04` + frequency + duration). The service uses
+it for "your turn" / wrong-move / game-over cues (`board.beeps: true`). If beeps
+don't sound or sound wrong, that command/encoding in `boards/usb.py` is the place
+to adjust; set `board.beeps: false` to disable.
 
 ## Reference
 

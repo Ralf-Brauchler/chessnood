@@ -37,6 +37,7 @@ USAGE_PAGE = 0xFF00
 # --- commands (EasyLinkSDK) ------------------------------------------------
 CMD_REALTIME = bytes([0x21, 0x01, 0x00])   # switch to real-time board streaming
 CMD_LED = bytes([0x0A, 0x08])              # + 8 rank bytes
+CMD_BEEP = bytes([0x0B, 0x04])             # + freq (2 bytes) + duration ms (2 bytes)
 WRITE_INTERVAL_S = 0.2                      # SDK enforces >=200ms between writes
 
 # Report framing (EasyLinkSDK read thread + toFen).
@@ -114,6 +115,12 @@ class UsbBoard(Board):
 
     async def set_leds(self, squares: Iterable[int]) -> None:
         payload = encode_leds(squares)
+        await asyncio.to_thread(self._write, payload)
+
+    async def beep(self, frequency_hz: int = 1000, duration_ms: int = 150) -> None:
+        f = max(0, min(0xFFFF, int(frequency_hz)))
+        d = max(0, min(0xFFFF, int(duration_ms)))
+        payload = CMD_BEEP + bytes([f >> 8, f & 0xFF, d >> 8, d & 0xFF])
         await asyncio.to_thread(self._write, payload)
 
     # --- thread side ------------------------------------------------------

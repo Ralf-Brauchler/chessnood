@@ -51,6 +51,9 @@ class Runner:
         # what's actually on the board, including a piece lifted mid-move)
         self._sensed = chess.Board()
         self._ui = Guidance("", "")  # current committed guidance (recomputed on settled readings)
+        self._beeps = cfg.board.beeps
+        self._prev_state = self._game.state
+        self._prev_alert = False
         self._game_file = Path(cfg.game_state_file) if cfg.game_state_file else None
         self._load_game()
 
@@ -177,11 +180,25 @@ class Runner:
         # the board LEDs (primary move indicator) and the screen together.
         self._ui = compute_guidance(self._game, self._sensed)
         await self._board.set_leds(self._ui.highlight)
+        await self._beep_on_transition()
         self._refresh_screen()
         self._save_game()
 
         if reaction.engine_should_move:
             await self._do_engine_move()
+
+    async def _beep_on_transition(self) -> None:
+        """A short tone only when something newly needs the player's attention."""
+        if self._beeps:
+            state = self._game.state
+            if self._ui.alert and not self._prev_alert:
+                await self._board.beep(350, 220)            # something is wrong
+            elif state == GameState.ENGINE_MOVE_SHOWN and self._prev_state != state:
+                await self._board.beep(900, 120)            # your turn to play the move
+            elif state == GameState.GAME_OVER and self._prev_state != state:
+                await self._board.beep(600, 400)            # game over
+        self._prev_state = self._game.state
+        self._prev_alert = self._ui.alert
 
     async def _do_engine_move(self) -> None:
         # Reload settings (e.g. skill_level changed over SSH) before thinking.

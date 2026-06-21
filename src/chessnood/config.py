@@ -28,6 +28,7 @@ class EngineConfig:
 class BoardConfig:
     backend: str = "usb"  # "usb" | "mock"
     settle_ms: int = 1000  # a move is committed only after the board is stable this long
+    beeps: bool = True     # short tones on the board for "your turn" / wrong move / game over
 
 
 @dataclass
