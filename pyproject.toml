@@ -13,12 +13,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Bluetooth LE support (needed on the real board, works on macOS/Linux/Windows).
+# USB-HID support (primary transport to the real board; works on macOS/Linux/Windows).
+usb = ["hidapi>=0.14"]
+# Bluetooth LE support (legacy/optional alternative transport).
 ble = ["bleak>=0.21"]
 # Screen rendering (and the `preview` command). Works anywhere.
 display = ["Pillow>=10.1"]
-# Raspberry Pi: framebuffer screen + touch input. evdev only installs on Linux.
-pi = ["Pillow>=10.1", "evdev>=1.6"]
+# Raspberry Pi: USB board + framebuffer screen + touch input. evdev only installs on Linux.
+pi = ["hidapi>=0.14", "Pillow>=10.1", "evdev>=1.6"]
 dev = ["pytest>=8.0", "Pillow>=10.1"]
 
 [project.scripts]

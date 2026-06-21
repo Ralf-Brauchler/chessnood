@@ -12,6 +12,10 @@ def build_board(cfg: BoardConfig) -> Board:
     """Construct the board backend named in the config."""
     if cfg.backend == "mock":
         return MockBoard()
+    if cfg.backend == "usb":
+        from .usb import UsbBoard  # imported lazily so hidapi stays optional
+
+        return UsbBoard()
     if cfg.backend == "ble":
         from .ble import BleBoard  # imported lazily so bleak stays optional
 
