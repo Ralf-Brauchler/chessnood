@@ -32,15 +32,18 @@ class BoardConfig:
 
 
 @dataclass
-class ButtonsConfig:
-    new_game_pin: int | None = 27
-    resign_pin: int | None = 22
+class DisplayConfig:
+    """The 3.5" SPI touchscreen (MHS-3.5) used as a status + control panel.
 
+    The board LEDs stay the primary move indicator; this screen shows
+    plain-language status and a big "Neue Partie" touch button.
+    """
 
-@dataclass
-class HardwareConfig:
-    status_led_pin: int | None = 17
-    buttons: ButtonsConfig = field(default_factory=ButtonsConfig)
+    backend: str = "auto"            # auto | framebuffer | console | preview | none
+    fb_device: str = "/dev/fb1"      # SPI TFT framebuffer device  # VERIFY on Pi
+    touch_device: str | None = None  # evdev path; None = auto-detect  # VERIFY on Pi
+    rotate: int = 0                  # 0 | 90 | 180 | 270  # VERIFY orientation on Pi
+    preview_path: str = "./chessnood-screen.png"  # where the "preview" backend writes
 
 
 @dataclass
@@ -56,7 +59,7 @@ class GameConfig:
 class Config:
     engine: EngineConfig = field(default_factory=EngineConfig)
     board: BoardConfig = field(default_factory=BoardConfig)
-    hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    display: DisplayConfig = field(default_factory=DisplayConfig)
     game: GameConfig = field(default_factory=GameConfig)
     log_level: str = "info"
     status_file: str = "./chessnood-status.json"
@@ -64,14 +67,10 @@ class Config:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Config":
         data = data or {}
-        buttons = (data.get("hardware") or {}).get("buttons") or {}
         return cls(
             engine=EngineConfig(**(data.get("engine") or {})),
             board=BoardConfig(**(data.get("board") or {})),
-            hardware=HardwareConfig(
-                status_led_pin=(data.get("hardware") or {}).get("status_led_pin", 17),
-                buttons=ButtonsConfig(**buttons),
-            ),
+            display=DisplayConfig(**(data.get("display") or {})),
             game=GameConfig(**(data.get("game") or {})),
             log_level=data.get("log_level", "info"),
             status_file=data.get("status_file", "./chessnood-status.json"),

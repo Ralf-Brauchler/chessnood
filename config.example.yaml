@@ -18,11 +18,13 @@ board:
 game:
   human_color: white     # which colour your father plays: white | black
 
-hardware:
-  status_led_pin: 17     # BCM pin for the Bluetooth status LED (null to disable)
-  buttons:
-    new_game_pin: 27     # BCM pin for the "New game" button (null to disable)
-    resign_pin: 22       # BCM pin for an optional "Resign" button (null to disable)
+display:                 # the 3.5" SPI touchscreen (MHS-3.5): status + "Neue Partie" button
+  backend: auto          # auto | framebuffer | console | preview | none
+                         #   auto = framebuffer if fb_device exists, else console
+  fb_device: /dev/fb1    # SPI TFT framebuffer device
+  touch_device: null     # evdev path for the touch panel; null = auto-detect
+  rotate: 0              # 0 | 90 | 180 | 270 — screen orientation
+  preview_path: ./chessnood-screen.png   # where the "preview" backend writes
 
 log_level: info          # debug | info | warning | error
 status_file: ./chessnood-status.json   # `chessnood status` reads this file

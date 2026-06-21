@@ -1,8 +1,9 @@
 # Raspberry Pi setup
 
-Target: Raspberry Pi 4 (1 GB is enough for this headless setup), Raspberry Pi OS
-Lite (64-bit). No screen — board LEDs are the display, GPIO buttons + SSH are the
-controls.
+Target: Raspberry Pi 4 (1 GB is enough), Raspberry Pi OS (64-bit) + a 3.5" SPI
+touchscreen (MHS-3.5). The **board LEDs are the primary move display**; the screen
+shows plain-language status and a big "Neue Partie" touch button; SSH is for setup
+and tuning.
 
 ## 1. Flash the SD card
 
@@ -23,16 +24,28 @@ cp config.example.yaml config.yaml  # then edit (see below)
 sudo systemctl start chessnood
 ```
 
-## 3. Wiring
+## 3. The touchscreen (MHS-3.5)
 
-**Status LED** (Bluetooth state): LED + ~330 Ω resistor between BCM 17 and GND.
-- solid = connected, slow blink = scanning, fast blink = error.
+The display mounts on the 40-pin header (SPI). On Raspberry Pi OS Bookworm enable
+it with a **device-tree overlay** (not the old `LCD-show` scripts), e.g. add to
+`/boot/firmware/config.txt`:
 
-**Buttons**: a momentary button between the pin and GND (internal pull-ups are used).
-- New game → BCM 27
-- Resign (optional) → BCM 22
+```
+dtoverlay=mhs35:rotate=90      # VERIFY the exact overlay name / rotation for your panel
+```
 
-Pins are configurable under `hardware:` in `config.yaml`. Set a pin to `null` to disable it.
+After a reboot the screen appears as `/dev/fb1` and the touch panel as an evdev
+device. Then in `config.yaml` under `display:` leave `backend: auto` (it picks the
+framebuffer automatically). Tune `rotate:` if the image is sideways, and—if needed—
+set `touch_device:` and calibrate (the touch mapping in `display.py` is marked
+`# VERIFY`).
+
+Preview the look on any machine first, no Pi required:
+
+```
+pip install -e '.[display]'
+chessnood preview           # writes chessnood-preview.png
+```
 
 ## 4. Day-to-day (over SSH)
 

@@ -4,6 +4,7 @@
   chessnood simulate   play a full game with no hardware (proves the logic)
   chessnood scan       list nearby BLE devices (first hardware test)
   chessnood status     print what a running service is doing
+  chessnood preview    render the touchscreen to a PNG to see how it looks
 """
 from __future__ import annotations
 
@@ -101,6 +102,42 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return asyncio.run(_scan())
 
 
+def cmd_preview(args: argparse.Namespace) -> int:
+    """Render the screen in a few states, stacked into one PNG, so you can see
+    exactly what your father sees — no Pi or board needed."""
+    try:
+        from PIL import Image
+
+        from .display import SCREEN_H, SCREEN_W, UiModel, render
+    except ImportError:
+        print("Pillow not installed. Run:  pip install 'chessnood[display]'", file=sys.stderr)
+        return 1
+    from .boards.base import ConnectionState
+
+    mid = chess.Board()
+    for uci in ("e2e4", "e7e5", "g1f3"):
+        mid.push_uci(uci)
+    samples = [
+        UiModel(ConnectionState.SCANNING, "Suche das Brett …",
+                "Schalte das Brett ein und warte kurz.", chess.Board()),
+        UiModel(ConnectionState.CONNECTED, "Stelle die Figuren auf",
+                "Stelle alle Figuren auf die Grundstellung.", chess.Board()),
+        UiModel(ConnectionState.CONNECTED, "Du bist am Zug",
+                "Mach deinen Zug auf dem Brett.", mid),
+        UiModel(ConnectionState.CONNECTED, "Computer hat gezogen",
+                "Die leuchtenden Felder zeigen den Zug. Führe ihn auf dem Brett aus.",
+                mid, [chess.G1, chess.F3]),
+    ]
+    frames = [render(s) for s in samples]
+    gap = 12
+    sheet = Image.new("RGB", (SCREEN_W, SCREEN_H * len(frames) + gap * (len(frames) - 1)), (0, 0, 0))
+    for i, frame in enumerate(frames):
+        sheet.paste(frame, (0, i * (SCREEN_H + gap)))
+    sheet.save(args.out)
+    print(f"Wrote {args.out} — {len(frames)} screens (480x320 each).")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     cfg = Config.load(args.config)
     try:
@@ -127,6 +164,10 @@ def main(argv: list[str] | None = None) -> int:
     p_scan = sub.add_parser("scan", help="list nearby BLE devices")
     p_scan.add_argument("--timeout", type=float, default=10.0)
     p_scan.set_defaults(func=cmd_scan)
+
+    p_prev = sub.add_parser("preview", help="render the touchscreen to a PNG")
+    p_prev.add_argument("--out", default="./chessnood-preview.png")
+    p_prev.set_defaults(func=cmd_preview)
 
     sub.add_parser("status", help="print running service status").set_defaults(func=cmd_status)
 
