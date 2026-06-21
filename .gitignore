@@ -8,3 +8,4 @@ dist/
 chessnood-status.json
 config.yaml
 .pytest_cache/
+.vscode/
