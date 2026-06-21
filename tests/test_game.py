@@ -135,9 +135,12 @@ def test_selfplay_board_drives_a_game_via_runner(tmp_path):
     from chessnood.config import ConfigWatcher
     from chessnood.runner import Runner
 
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("board:\n  backend: mock\n  settle_ms: 0\ndisplay:\n  backend: none\n")
+
     async def _drive():
         board = SelfPlayBoard(human_color=_chess.WHITE, move_pause=0.0, transient_pause=0.0)
-        watcher = ConfigWatcher(str(tmp_path / "no-config.yaml"))  # all defaults
+        watcher = ConfigWatcher(str(cfg))
         runner = Runner(board, watcher)
         task = asyncio.create_task(runner.run())
         # let the self-play loop make a handful of plies
@@ -202,3 +205,36 @@ def test_selfplay_capture_emits_transient_then_final(tmp_path):
     assert chess.E4 not in out[0].pieces
     # final: our pawn now stands on d5
     assert out[-1].pieces[chess.D5] == chess.Piece.from_symbol("P")
+
+
+def test_slide_over_intermediate_is_not_committed(tmp_path):
+    """Sliding a pawn over e3 to e4 must commit e2e4, not the transient e2e3."""
+    import asyncio
+    import chess as _chess
+    from chessnood.boards.mock import MockBoard
+    from chessnood.config import ConfigWatcher
+    from chessnood.runner import Runner
+
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("board:\n  backend: mock\n  settle_ms: 80\ndisplay:\n  backend: none\n")
+
+    async def _run():
+        board = MockBoard()
+        watcher = ConfigWatcher(str(cfg))
+        runner = Runner(board, watcher)
+        task = asyncio.create_task(runner.run())
+        await asyncio.sleep(0.2)            # start position settles -> PLAYER_TURN
+        over = _chess.Board(); over.push_uci("e2e3")
+        board.set_position(over)            # pawn momentarily on e3 (a legal move!)
+        await asyncio.sleep(0.02)           # < settle window
+        final = _chess.Board(); final.push_uci("e2e4")
+        board.set_position(final)           # ... continues to e4
+        await asyncio.sleep(0.25)           # > settle -> commit
+        b = runner._game.board
+        task.cancel()
+        return b
+
+    b = asyncio.run(_run())
+    assert b.piece_at(chess.E4) is not None
+    assert b.piece_at(chess.E3) is None
+    assert b.move_stack and b.move_stack[0] == chess.Move.from_uci("e2e4")

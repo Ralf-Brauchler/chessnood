@@ -52,6 +52,7 @@ class Runner:
         self._game = ChessGame(human_color=cfg.game.human_color_bool)
         self._display = make_display(cfg.display)
         self._status = StatusFile(cfg.status_file)
+        self._settle_s = max(0.0, cfg.board.settle_ms / 1000.0)
         self._new_game_requested = asyncio.Event()
         self._connection = board.state
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -131,10 +132,30 @@ class Runner:
             self._refresh_screen()
 
     async def _handle_readings(self, readings: "asyncio.Queue") -> None:
+        """Show every reading live, but only *commit* a settled position.
+
+        A move is fed to the game logic only once the board has been stable for
+        ``settle_s``. This stops a piece slid across an intermediate square (e.g.
+        a pawn passing over e3 on its way to e4, which momentarily reads as the
+        legal move e2e3) from being committed as the wrong move -- a brief pass
+        isn't stable, only the final resting position is.
+        """
         while True:
             reading = await readings.get()
-            self._sensed = _board_from_pieces(reading.pieces)
+            self._show_sensed(reading)
+            # absorb further readings until the board is quiet for settle_s
+            while self._settle_s > 0:
+                try:
+                    reading = await asyncio.wait_for(readings.get(), self._settle_s)
+                except asyncio.TimeoutError:
+                    break
+                self._show_sensed(reading)
             await self._apply(self._game.feed(reading))
+
+    def _show_sensed(self, reading) -> None:
+        """Reflect the physically sensed position on screen (live, uncommitted)."""
+        self._sensed = _board_from_pieces(reading.pieces)
+        self._refresh_screen()
 
     async def _apply(self, reaction: Reaction) -> None:
         """Carry out a game Reaction: LEDs, logging, and engine turns."""

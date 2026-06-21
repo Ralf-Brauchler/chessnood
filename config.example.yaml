@@ -12,6 +12,8 @@ engine:
 
 board:
   backend: usb           # usb = real board over USB cable | mock = no hardware (for testing)
+  settle_ms: 250         # a move counts only after the board is stable this long;
+                         # ignores pieces slid over intermediate squares. Lower = snappier.
 
 game:
   human_color: white     # which colour your father plays: white | black
