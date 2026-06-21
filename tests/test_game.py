@@ -125,3 +125,29 @@ def test_new_game_resets():
     game.new_game()
     assert game.state == GameState.NEED_SETUP
     assert game.board.fen() == chess.STARTING_FEN
+
+
+def test_selfplay_board_drives_a_game_via_runner(tmp_path):
+    """The SelfPlayBoard + real Runner should advance a game without hardware."""
+    import asyncio
+    import chess as _chess
+    from chessnood.boards.mock import SelfPlayBoard
+    from chessnood.config import ConfigWatcher
+    from chessnood.runner import Runner
+
+    async def _drive():
+        board = SelfPlayBoard(human_color=_chess.WHITE, move_pause=0.0)
+        watcher = ConfigWatcher(str(tmp_path / "no-config.yaml"))  # all defaults
+        runner = Runner(board, watcher)
+        task = asyncio.create_task(runner.run())
+        # let the self-play loop make a handful of plies
+        for _ in range(50):
+            await asyncio.sleep(0)
+            if len(board._board.move_stack) >= 4:
+                break
+            await asyncio.sleep(0.02)
+        task.cancel()
+        return len(board._board.move_stack)
+
+    plies = asyncio.run(_drive())
+    assert plies >= 4
