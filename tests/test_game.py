@@ -84,6 +84,38 @@ def test_full_turn_cycle():
     assert react.leds == []
 
 
+def test_auto_new_game_when_pieces_reset_to_start():
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))               # NEED_SETUP -> PLAYER_TURN
+    b = chess.Board()
+    b.push_uci("e2e4")
+    game.feed(reading_of(b))                            # -> ENGINE_THINKING
+    game.set_engine_move(chess.Move.from_uci("e7e5"))   # -> ENGINE_MOVE_SHOWN
+    react = game.feed(reading_of(chess.Board()))        # all pieces back to start
+    assert game.state == GameState.PLAYER_TURN
+    assert game.board.fen() == chess.STARTING_FEN
+    assert game.pending_engine_move is None
+    assert not react.engine_should_move
+
+
+def test_no_false_restart_at_first_move():
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))               # PLAYER_TURN, no moves yet
+    react = game.feed(reading_of(chess.Board()))        # start pos again != restart
+    assert game.state == GameState.PLAYER_TURN
+    assert not react.engine_should_move
+
+
+def test_auto_new_game_from_game_over():
+    game = ChessGame(human_color=chess.WHITE)
+    for uci in ("f2f3", "e7e5", "g2g4", "d8h4"):       # fool's mate
+        game.board.push_uci(uci)
+    game.state = GameState.GAME_OVER
+    game.feed(reading_of(chess.Board()))                # reset pieces -> new game
+    assert game.state == GameState.PLAYER_TURN
+    assert game.board.fen() == chess.STARTING_FEN
+
+
 def test_new_game_resets():
     game = ChessGame()
     game.feed(reading_of(chess.Board()))

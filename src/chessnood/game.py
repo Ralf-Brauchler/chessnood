@@ -92,14 +92,34 @@ class ChessGame:
                 return self._begin_play()
             return Reaction(message="Waiting for start position")
 
+        # Auto new game: once a game has started, putting every piece back in the
+        # initial position is the "new game" signal -- no button or touch needed.
+        if self._is_restart_request(reading):
+            self.board.reset()
+            self.pending_engine_move = None
+            return self._begin_play()
+
         if self.state == GameState.PLAYER_TURN:
             return self._handle_player(reading)
 
         if self.state == GameState.ENGINE_MOVE_SHOWN:
             return self._handle_engine_execution(reading)
 
-        # ENGINE_THINKING / GAME_OVER: ignore board noise.
+        # ENGINE_THINKING / GAME_OVER: ignore other board noise.
         return Reaction()
+
+    def _is_restart_request(self, reading: BoardReading) -> bool:
+        """True when the player has reset the board to the start position.
+
+        Only meaningful once play has progressed (or the game is over) -- at the
+        very first move the board legitimately *is* the start position, which is
+        normal play, not a restart. Ignored while the engine is thinking.
+        """
+        if self.state == GameState.ENGINE_THINKING:
+            return False
+        if self.state != GameState.GAME_OVER and not self.board.move_stack:
+            return False
+        return reading.matches(chess.Board())
 
     def _handle_player(self, reading: BoardReading) -> Reaction:
         detection, move = detect_move(self.board, reading)

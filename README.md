@@ -4,11 +4,11 @@ A senior-friendly chess computer for the **Chessnut Pro** e-board, designed to
 run on a **Raspberry Pi 4** with a small **3.5" touchscreen**.
 
 The board's own LEDs are the **primary move display** (the lit squares show the
-computer's move — no notation to read). A small touchscreen shows calm,
-plain-language status ("Du bist am Zug", "Computer denkt …") and a single big
-**Neue Partie** button. Everything else — strength, debugging — happens over SSH.
-The Bluetooth connection reconnects silently in the background, so the player
-never sees a "connect" button.
+computer's move — no notation to read). A small screen shows calm, plain-language
+status ("Du bist am Zug", "Computer denkt …"). To start a fresh game the player
+simply puts all the pieces back in the starting position — no buttons to find.
+Everything else — strength, debugging — happens over SSH. The Bluetooth connection
+reconnects silently in the background, so the player never sees a "connect" button.
 
 > **Status: scaffold.** The full game logic, engine, config, service and CLI work
 > today and are tested in simulation. The Chessnut **BLE protocol is implemented
@@ -19,7 +19,7 @@ never sees a "connect" button.
 - Python 3.11+
 - A [Chessnut](https://www.chessnutech.com/) e-board with Bluetooth LE (developed against the **Pro**)
 - For deployment: a Raspberry Pi (4 recommended; 1 GB RAM is enough), Raspberry Pi OS
-- A 3.5" SPI touchscreen (developed against the **MHS-3.5**) for status + a "Neue Partie" button
+- A 3.5" SPI screen (developed against the **MHS-3.5**, ILI9486) for plain-language status
 - Optional but recommended: [Stockfish](https://stockfishchess.org/) as the opponent (`apt install stockfish`); without it the engine falls back to random legal moves
 
 ## Try it now (no hardware, no Stockfish needed)
@@ -38,18 +38,18 @@ python3 -m venv .venv
 
 ```
  [Chessnut Pro] --BLE--> boards/ble.py  ---reading--->  game.py (pure state machine)
- [touchscreen]  <------> display.py                          |  detects the move played,
- ("Neue Partie")                                             |  asks the engine to reply,
+ [3.5" screen]  <------- display.py                          |  detects the move played,
+                                                             |  asks the engine to reply,
                                                              v  lights from/to LEDs on the board
                          runner.py  <---->  engine.py (Stockfish / random fallback)
                               |             (screen mirrors status + a visual board)
                          SSH: config.yaml (live reload), `chessnood status`, journald
 ```
 
-- `game.py` — pure, I/O-free state machine (fully unit-tested)
+- `game.py` — pure, I/O-free state machine (fully unit-tested); a new game starts when the pieces are reset to the start position
 - `runner.py` — async glue: board ↔ game ↔ engine ↔ LEDs ↔ screen, auto-reconnect, live config reload
 - `boards/` — `mock` (testing) and `ble` (real board); a `usb` backend can be added later
-- `display.py` — touchscreen UI: status + "Neue Partie"; pure-Pillow render, framebuffer/console/preview backends
+- `display.py` — status screen: plain-language state + a visual board; pure-Pillow render, framebuffer/console/preview backends
 - `engine.py` — Stockfish over UCI, with a random-mover fallback
 - `config.py` — YAML config, hot-reloaded between moves
 

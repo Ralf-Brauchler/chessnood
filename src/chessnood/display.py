@@ -173,9 +173,12 @@ def render(model: UiModel):
             draw.text((_PANEL_X, y), line, font=font, fill=_MUTED)
             y += 26
 
-    # the one big touch control
-    draw.rounded_rectangle(BUTTON_RECT, radius=10, fill=_BTN)
-    _centred(draw, "Neue Partie", _font(30), _BTN_FG, BUTTON_RECT)
+    # footer hint: a new game is started simply by resetting the pieces
+    # (no touch/button -- the resistive touch panel is unreliable on this board)
+    draw.line((12, 254, SCREEN_W - 12, 254), fill=(40, 46, 54), width=1)
+    hint = "Neue Partie: alle Figuren in die Grundstellung stellen"
+    _centred(draw, hint, _fit_font(draw, hint, SCREEN_W - 24, 20, 13), _MUTED,
+             (0, 260, SCREEN_W, 312))
     return img
 
 

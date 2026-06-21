@@ -4,7 +4,10 @@ set -euo pipefail
 
 echo ">> Installing system packages..."
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-pip stockfish bluez
+# python3-dev + build-essential: needed to build the 'evdev' wheel (in .[pi])
+# fonts-dejavu-core: a TrueType font so the screen can render umlauts
+sudo apt-get install -y python3-venv python3-pip python3-dev build-essential \
+    fonts-dejavu-core stockfish bluez
 
 echo ">> Creating virtualenv and installing chessnood..."
 python3 -m venv .venv
@@ -19,6 +22,9 @@ sudo cp systemd/chessnood.service /etc/systemd/system/chessnood.service
 sudo systemctl daemon-reload
 sudo systemctl enable chessnood.service
 
+echo
+echo ">> NOTE: set up the 3.5\" screen overlay separately -- see docs/SETUP_PI.md"
+echo "   (install the goodtft mhs35 overlay; set display.fb_device: /dev/fb0)."
 echo
 echo "Done. Useful commands:"
 echo "  sudo systemctl start chessnood     # start now"

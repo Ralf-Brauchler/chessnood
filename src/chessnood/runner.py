@@ -32,7 +32,7 @@ _STATUS_TEXT = {
     GameState.ENGINE_THINKING: ("Computer denkt …", "Bitte einen Moment warten."),
     GameState.ENGINE_MOVE_SHOWN: ("Computer hat gezogen",
                                   "Die leuchtenden Felder zeigen den Zug. Führe ihn auf dem Brett aus."),
-    GameState.GAME_OVER: ("Spiel vorbei", "Tippe unten auf den Knopf, um nochmal zu spielen."),
+    GameState.GAME_OVER: ("Spiel vorbei", "Für eine neue Partie alle Figuren wieder aufstellen."),
 }
 
 
