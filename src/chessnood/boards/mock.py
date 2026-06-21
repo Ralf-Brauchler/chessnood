@@ -53,79 +53,98 @@ class SelfPlayBoard(Board):
 
     Plugged into the real :class:`~chessnood.runner.Runner`, it drives a full game
     (random "human" vs the configured engine) so the screen and LED logic show the
-    genuine flow -- no physical board needed. It follows the game purely by what
-    the Runner asks it to light:
+    genuine flow -- no physical board needed.
 
-      * ``set_leds([from, to])`` = the engine's move -> execute it on the board.
-      * ``set_leds([])`` = the human's turn -> play a random legal move.
+    It mimics a *real* e-board faithfully: every move is emitted as a **sequence of
+    whole-board snapshots**, not as a move. First an intermediate reading with the
+    moving piece(s) lifted off (which matches no legal move -> the game treats it as
+    a transient and ignores it), then the final position. This exercises the same
+    transient handling that physical piece moves trigger.
 
-    The empty ``set_leds([])`` the Runner emits *right after* a human move (before
-    the engine thinks) is swallowed via the ``_just_moved`` flag, so the two cases
-    never get confused. On game over it resets to the start position, which the
-    Runner treats as a new game -- so it loops forever, ideal as a dev display.
+    Turns are driven from the board itself; the Runner's ``set_leds([from, to])`` is
+    used only to learn which move the engine chose (the only thing the board can't
+    know on its own). On game over it resets to the start position, which the Runner
+    treats as a new game -- so it loops forever, ideal as a dev display.
     """
 
-    def __init__(self, human_color: chess.Color = chess.WHITE, move_pause: float = 1.2):
+    def __init__(self, human_color: chess.Color = chess.WHITE,
+                 move_pause: float = 1.2, transient_pause: float = 0.35):
         super().__init__()
         self._board = chess.Board()
         self._human_color = human_color
         self._pause = move_pause
-        self._just_moved = False
-        self._pending: asyncio.Task | None = None
+        self._transient_pause = transient_pause
+        self._run = False
+        self._task: asyncio.Task | None = None
+        self._lit: tuple[int, int] | None = None  # last 2-square set_leds (engine move)
 
     async def connect(self) -> None:
         self._set_state(ConnectionState.CONNECTED)
-        self._emit(BoardReading.from_board(self._board))
+        self._emit(BoardReading.from_board(self._board))  # start position
+        self._run = True
+        self._task = asyncio.create_task(self._drive())
 
     async def disconnect(self) -> None:
-        if self._pending:
-            self._pending.cancel()
+        self._run = False
+        if self._task:
+            self._task.cancel()
         self._set_state(ConnectionState.DISCONNECTED)
 
     async def set_leds(self, squares: Iterable[int]) -> None:
         sq = list(squares)
-        if len(sq) == 2:
-            self._just_moved = False
-            self._after_pause(self._execute_engine_move, sq[0], sq[1])
-        elif not sq:
-            if self._just_moved:
-                self._just_moved = False  # spurious post-human-move clear
-                return
-            self._after_pause(self._play_human_move)
+        # Only the 2-square form carries information we need: the engine's move.
+        self._lit = (sq[0], sq[1]) if len(sq) == 2 else None
 
-    def _after_pause(self, fn, *args) -> None:
-        if self._pending and not self._pending.done():
-            self._pending.cancel()
+    async def _drive(self) -> None:
+        try:
+            # let the Runner consume the start position before we start moving
+            await asyncio.sleep(0.05)
+            while self._run:
+                if self._board.is_game_over():
+                    log.info("[demo] game over (%s); new game", self._board.result())
+                    await asyncio.sleep(self._pause * 1.5)
+                    self._board.reset()
+                    self._emit(BoardReading.from_board(self._board))  # -> new game
+                    await asyncio.sleep(self._pause)
+                    continue
 
-        async def _run():
-            try:
                 await asyncio.sleep(self._pause)
-            except asyncio.CancelledError:
-                return
-            fn(*args)
+                if self._board.turn == self._human_color:
+                    move = random.choice(list(self._board.legal_moves))
+                else:
+                    move = await self._await_engine_move()
+                    if move is None:
+                        break  # disconnected
+                await self._play_as_sequence(move)
+        except asyncio.CancelledError:
+            pass
 
-        self._pending = asyncio.create_task(_run())
+    async def _await_engine_move(self) -> chess.Move | None:
+        """Wait until the Runner lights a move that is legal on the current board.
 
-    def _play_human_move(self) -> None:
-        if self._board.is_game_over():
-            self._after_pause(self._restart)
-            return
-        move = random.choice(list(self._board.legal_moves))
+        Polling on legality (rather than an event) sidesteps races: a stale lit
+        move from the previous turn won't be legal now, so it's simply skipped
+        until the Runner lights the genuine new engine move.
+        """
+        while self._run:
+            if self._lit is not None:
+                move = self._match_move(self._lit[0], self._lit[1])
+                if move is not None:
+                    self._lit = None
+                    return move
+            await asyncio.sleep(0.01)
+        return None
+
+    async def _play_as_sequence(self, move: chess.Move) -> None:
+        """Emit 'pieces lifted' (a transient) then the final position."""
+        before = dict(self._board.piece_map())
         self._board.push(move)
-        self._just_moved = True
-        self._emit(BoardReading.from_board(self._board))
-
-    def _execute_engine_move(self, frm: int, to: int) -> None:
-        move = self._match_move(frm, to)
-        if move is not None:
-            self._board.push(move)
-        self._emit(BoardReading.from_board(self._board))
-
-    def _restart(self) -> None:
-        log.info("[demo] game over (%s); starting a new game", self._board.result())
-        self._board.reset()
-        self._just_moved = False
-        self._emit(BoardReading.from_board(self._board))
+        after = dict(self._board.piece_map())
+        changed = {sq for sq in set(before) | set(after) if before.get(sq) != after.get(sq)}
+        lifted = {sq: p for sq, p in before.items() if sq not in changed}
+        self._emit(BoardReading(lifted))            # transient: ignored by the game
+        await asyncio.sleep(self._transient_pause)
+        self._emit(BoardReading(after))             # the completed move
 
     def _match_move(self, frm: int, to: int) -> chess.Move | None:
         for m in self._board.legal_moves:

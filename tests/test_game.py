@@ -136,7 +136,7 @@ def test_selfplay_board_drives_a_game_via_runner(tmp_path):
     from chessnood.runner import Runner
 
     async def _drive():
-        board = SelfPlayBoard(human_color=_chess.WHITE, move_pause=0.0)
+        board = SelfPlayBoard(human_color=_chess.WHITE, move_pause=0.0, transient_pause=0.0)
         watcher = ConfigWatcher(str(tmp_path / "no-config.yaml"))  # all defaults
         runner = Runner(board, watcher)
         task = asyncio.create_task(runner.run())
@@ -151,3 +151,54 @@ def test_selfplay_board_drives_a_game_via_runner(tmp_path):
 
     plies = asyncio.run(_drive())
     assert plies >= 4
+
+
+def test_lifted_piece_is_a_transient_then_move_detected():
+    """A 'piece lifted' reading is INVALID (ignored); the completed move is detected."""
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))  # -> PLAYER_TURN
+
+    # 1) lift the e2 pawn (e2 empty) -> no legal move matches -> transient
+    lifted = dict(chess.Board().piece_map())
+    del lifted[chess.E2]
+    react = game.feed(BoardReading(lifted))
+    assert react.invalid
+    assert not react.engine_should_move
+    assert game.state == GameState.PLAYER_TURN
+
+    # 2) place it on e4 -> completed move detected
+    after = chess.Board()
+    after.push_uci("e2e4")
+    react = game.feed(reading_of(after))
+    assert react.engine_should_move
+    assert game.state == GameState.ENGINE_THINKING
+
+
+def test_selfplay_capture_emits_transient_then_final(tmp_path):
+    """SelfPlayBoard plays a capture as lift(s) -> final, both whole positions."""
+    import asyncio
+    import chess as _chess
+    from chessnood.boards.base import BoardReading as _BR
+    from chessnood.boards.mock import SelfPlayBoard
+
+    async def _run():
+        board = SelfPlayBoard(move_pause=0.0, transient_pause=0.0)
+        readings = board.subscribe_readings()
+        b = _chess.Board()
+        for uci in ("e2e4", "d7d5"):  # set up a capture: exd5
+            b.push_uci(uci)
+        board._board = b.copy()
+        cap = _chess.Move.from_uci("e4d5")
+        await board._play_as_sequence(cap)
+        out = []
+        while not readings.empty():
+            out.append(readings.get_nowait())
+        return out
+
+    out = asyncio.run(_run())
+    assert len(out) == 2  # transient then final
+    assert isinstance(out[0], _BR)
+    # transient: the capturing pawn has been lifted off e4 (and d5 not yet ours)
+    assert chess.E4 not in out[0].pieces
+    # final: our pawn now stands on d5
+    assert out[-1].pieces[chess.D5] == chess.Piece.from_symbol("P")
