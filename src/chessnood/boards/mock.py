@@ -92,8 +92,9 @@ class SelfPlayBoard(Board):
 
     async def set_leds(self, squares: Iterable[int]) -> None:
         sq = list(squares)
-        # Only the 2-square form carries information we need: the engine's move.
-        self._lit = (sq[0], sq[1]) if len(sq) == 2 else None
+        # The engine move's from/to are always the first two lit squares (extra
+        # squares may follow for castling/en passant). One square = a fix hint.
+        self._lit = (sq[0], sq[1]) if len(sq) >= 2 else None
 
     async def _drive(self) -> None:
         try:

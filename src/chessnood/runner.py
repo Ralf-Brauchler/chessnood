@@ -19,21 +19,10 @@ from .boards.base import Board, ConnectionState
 from .config import ConfigWatcher
 from .display import UiModel, make_display
 from .engine import Engine
-from .game import ChessGame, GameState, Reaction
+from .game import ChessGame, Guidance, Reaction, compute_guidance
 from .status import StatusFile
 
 log = logging.getLogger(__name__)
-
-# Plain-language, coordinate-free screen text per game phase (the player does
-# not read algebraic notation; the lit board LEDs show the actual move).
-_STATUS_TEXT = {
-    GameState.NEED_SETUP: ("Stelle die Figuren auf", "Stelle alle Figuren auf die Grundstellung."),
-    GameState.PLAYER_TURN: ("Du bist am Zug", "Mach deinen Zug auf dem Brett."),
-    GameState.ENGINE_THINKING: ("Computer denkt …", "Bitte einen Moment warten."),
-    GameState.ENGINE_MOVE_SHOWN: ("Computer hat gezogen",
-                                  "Die leuchtenden Felder zeigen den Zug. Führe ihn auf dem Brett aus."),
-    GameState.GAME_OVER: ("Spiel vorbei", "Für eine neue Partie alle Figuren wieder aufstellen."),
-}
 
 
 def _board_from_pieces(pieces: dict) -> chess.Board:
@@ -59,11 +48,13 @@ class Runner:
         # the last position the board physically sensed (so the screen can show
         # what's actually on the board, including a piece lifted mid-move)
         self._sensed = chess.Board()
+        self._ui = Guidance("", "")  # current committed guidance (recomputed on settled readings)
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._display.on_new_game(self._request_new_game)
         self._status.update(state="starting", skill_level=self._watcher.current.engine.skill_level)
+        self._ui = compute_guidance(self._game, self._sensed)
         self._refresh_screen()
         readings = self._board.subscribe_readings()
         states = self._board.subscribe_state()
@@ -101,22 +92,11 @@ class Runner:
             self._display.update(UiModel(self._connection, status,
                                          "Schalte das Brett ein und warte kurz.", self._sensed))
             return
-        status, instruction = _STATUS_TEXT.get(self._game.state, ("", ""))
-        if self._game.state == GameState.GAME_OVER:
-            status = self._game_over_text()
-        highlight = []
-        if self._game.state == GameState.ENGINE_MOVE_SHOWN and self._game.pending_engine_move:
-            move = self._game.pending_engine_move
-            highlight = [move.from_square, move.to_square]
-        # show the physically sensed position, so a piece lifted mid-move is visible
-        self._display.update(UiModel(self._connection, status, instruction,
-                                     self._sensed, highlight))
-
-    def _game_over_text(self) -> str:
-        outcome = self._game.board.outcome()
-        if outcome is None or outcome.winner is None:
-            return "Remis"
-        return "Weiß gewinnt" if outcome.winner == chess.WHITE else "Schwarz gewinnt"
+        # show the guidance's target position if it has one (e.g. "set it up like
+        # this"), otherwise the live physically sensed board
+        board = self._ui.target if self._ui.target is not None else self._sensed
+        self._display.update(UiModel(self._connection, self._ui.status,
+                                     self._ui.instruction, board, self._ui.highlight))
 
     async def _handle_new_game(self) -> None:
         while True:
@@ -129,6 +109,8 @@ class Runner:
             state = await states.get()
             self._connection = state
             self._status.update(connection=state.value)
+            if state == ConnectionState.CONNECTED:
+                self._ui = compute_guidance(self._game, self._sensed)
             self._refresh_screen()
 
     async def _handle_readings(self, readings: "asyncio.Queue") -> None:
@@ -158,13 +140,17 @@ class Runner:
         self._refresh_screen()
 
     async def _apply(self, reaction: Reaction) -> None:
-        """Carry out a game Reaction: LEDs, logging, and engine turns."""
+        """Carry out a game Reaction: recompute guidance, drive LEDs/screen, run engine."""
         if reaction.message:
             log.info("%s", reaction.message)
             self._status.update(state=self._game.state.name, last_move=reaction.message)
         if reaction.invalid:
             log.debug("Board reading does not match a legal move (transient)")
-        await self._board.set_leds(reaction.leds)  # board LEDs = primary move indicator
+
+        # Work out what to show/say and which squares to light, then apply it to
+        # the board LEDs (primary move indicator) and the screen together.
+        self._ui = compute_guidance(self._game, self._sensed)
+        await self._board.set_leds(self._ui.highlight)
         self._refresh_screen()
 
         if reaction.engine_should_move:
