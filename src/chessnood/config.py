@@ -27,7 +27,7 @@ class EngineConfig:
 @dataclass
 class BoardConfig:
     backend: str = "usb"  # "usb" | "mock"
-    settle_ms: int = 250  # a move is committed only after the board is stable this long
+    settle_ms: int = 1000  # a move is committed only after the board is stable this long
 
 
 @dataclass
