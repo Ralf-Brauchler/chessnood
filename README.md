@@ -1,7 +1,7 @@
 # chessnood
 
 A senior-friendly chess computer for the **Chessnut Pro** e-board, designed to
-run on a **Raspberry Pi 4** with a small **3.5" touchscreen**.
+run on a **Raspberry Pi 4** with a small **3.5" status screen**.
 
 The board's own LEDs are the **primary move display** (the lit squares show the
 computer's move — no notation to read). A small screen shows calm, plain-language
@@ -13,6 +13,24 @@ reconnects silently in the background, so the player never sees a "connect" butt
 > **Status: scaffold.** The full game logic, engine, config, service and CLI work
 > today and are tested in simulation. The Chessnut **BLE protocol is implemented
 > but not yet verified on real hardware** — see [docs/HARDWARE.md](docs/HARDWARE.md).
+
+## How the player uses it (the whole interaction)
+
+The player never touches the Pi — no buttons, no menus, no SSH. The complete
+interaction is at the board:
+
+1. **Switch on.** The screen shows *"Stelle die Figuren auf"* until the pieces
+   are in the standard starting position.
+2. **Play.** When it's the computer's turn, the two squares of its move light up
+   (board LEDs, mirrored on the screen) — move that piece. Make your own moves
+   normally; the board senses them.
+3. **New game.** Just put every piece back in the starting position — a fresh
+   game begins automatically. (So "reset the board" *is* "new game"; there is no
+   separate off/quit.)
+
+Strength, colour and other settings are fixed in `config.yaml` and only changed
+by the maintainer over SSH (live, no restart). Whether the player is White or
+Black is set there too — as Black, the computer moves first right after setup.
 
 ## Requirements
 
@@ -27,9 +45,9 @@ reconnects silently in the background, so the player never sees a "connect" butt
 ```
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                 # 19 tests
+.venv/bin/pytest                 # 22 tests
 .venv/bin/chessnood simulate     # plays a full game through the real logic
-.venv/bin/chessnood preview      # render the touchscreen to chessnood-preview.png
+.venv/bin/chessnood preview      # render the status screen to chessnood-preview.png
 ```
 
 (Without Stockfish installed, the opponent falls back to random legal moves.)

@@ -1,9 +1,9 @@
 # Raspberry Pi setup
 
 Target: Raspberry Pi 4 (1 GB is enough), Raspberry Pi OS (64-bit) + a 3.5" SPI
-touchscreen (MHS-3.5). The **board LEDs are the primary move display**; the screen
-shows plain-language status and a big "Neue Partie" touch button; SSH is for setup
-and tuning.
+screen (MHS-3.5). The **board LEDs are the primary move display**; the screen
+shows plain-language status. A new game starts by resetting the pieces to the
+start position (no button/touch); SSH is for setup and tuning.
 
 ## 1. Flash the SD card
 
