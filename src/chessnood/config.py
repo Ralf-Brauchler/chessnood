@@ -62,6 +62,7 @@ class Config:
     game: GameConfig = field(default_factory=GameConfig)
     log_level: str = "info"
     status_file: str = "./chessnood-status.json"
+    game_state_file: str = "./chessnood-game.json"  # saved so a power blip resumes mid-game
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Config":
@@ -73,6 +74,7 @@ class Config:
             game=GameConfig(**(data.get("game") or {})),
             log_level=data.get("log_level", "info"),
             status_file=data.get("status_file", "./chessnood-status.json"),
+            game_state_file=data.get("game_state_file", "./chessnood-game.json"),
         )
 
     @classmethod

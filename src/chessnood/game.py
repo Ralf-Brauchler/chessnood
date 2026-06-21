@@ -160,6 +160,22 @@ class ChessGame:
     def _result_text(self) -> str:
         return f"Game over: {self.board.result()}"
 
+    # --- persistence (survive a power loss mid-game) ----------------------
+    def snapshot(self) -> dict:
+        return {
+            "fen": self.board.fen(),
+            "state": self.state.name,
+            "pending": self.pending_engine_move.uci() if self.pending_engine_move else None,
+            "human_color": "white" if self.human_color == chess.WHITE else "black",
+        }
+
+    def restore(self, data: dict) -> None:
+        self.board = chess.Board(data["fen"])
+        self.state = GameState[data["state"]]
+        pending = data.get("pending")
+        self.pending_engine_move = chess.Move.from_uci(pending) if pending else None
+        self.human_color = chess.WHITE if data.get("human_color", "white") == "white" else chess.BLACK
+
 
 # --- on-screen / on-board guidance ---------------------------------------
 #

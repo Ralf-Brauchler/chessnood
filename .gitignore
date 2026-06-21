@@ -9,3 +9,4 @@ chessnood-status.json
 config.yaml
 .pytest_cache/
 .vscode/
+chessnood-game.json

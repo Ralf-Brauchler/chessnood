@@ -11,7 +11,9 @@ Responsibilities:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from pathlib import Path
 
 import chess
 
@@ -19,7 +21,7 @@ from .boards.base import Board, ConnectionState
 from .config import ConfigWatcher
 from .display import UiModel, make_display
 from .engine import Engine
-from .game import ChessGame, Guidance, Reaction, compute_guidance
+from .game import ChessGame, GameState, Guidance, Reaction, compute_guidance
 from .status import StatusFile
 
 log = logging.getLogger(__name__)
@@ -49,6 +51,8 @@ class Runner:
         # what's actually on the board, including a piece lifted mid-move)
         self._sensed = chess.Board()
         self._ui = Guidance("", "")  # current committed guidance (recomputed on settled readings)
+        self._game_file = Path(cfg.game_state_file) if cfg.game_state_file else None
+        self._load_game()
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -59,6 +63,10 @@ class Runner:
         readings = self._board.subscribe_readings()
         states = self._board.subscribe_state()
         await self._board.connect()
+
+        # If power was lost while the engine owed a move, finish that move now.
+        if self._game.state == GameState.ENGINE_THINKING:
+            asyncio.create_task(self._do_engine_move())
 
         tasks = [
             asyncio.create_task(self._handle_states(states)),
@@ -73,6 +81,24 @@ class Runner:
             await self._board.disconnect()
             self._engine.close()
             self._display.close()
+
+    # --- persistence ------------------------------------------------------
+    def _load_game(self) -> None:
+        if not self._game_file or not self._game_file.exists():
+            return
+        try:
+            self._game.restore(json.loads(self._game_file.read_text(encoding="utf-8")))
+            log.info("Resumed saved game (%s, %s)", self._game.state.name, self._game.board.fen())
+        except (OSError, ValueError, KeyError) as exc:
+            log.warning("Could not restore saved game: %s", exc)
+
+    def _save_game(self) -> None:
+        if not self._game_file:
+            return
+        try:
+            self._game_file.write_text(json.dumps(self._game.snapshot(), indent=2), encoding="utf-8")
+        except OSError:
+            pass
 
     def _request_new_game(self) -> None:
         """Called from the touch thread; hop back onto the event loop."""
@@ -152,6 +178,7 @@ class Runner:
         self._ui = compute_guidance(self._game, self._sensed)
         await self._board.set_leds(self._ui.highlight)
         self._refresh_screen()
+        self._save_game()
 
         if reaction.engine_should_move:
             await self._do_engine_move()

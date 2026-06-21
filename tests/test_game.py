@@ -136,7 +136,8 @@ def test_selfplay_board_drives_a_game_via_runner(tmp_path):
     from chessnood.runner import Runner
 
     cfg = tmp_path / "c.yaml"
-    cfg.write_text("board:\n  backend: mock\n  settle_ms: 0\ndisplay:\n  backend: none\n")
+    cfg.write_text(f"board:\n  backend: mock\n  settle_ms: 0\ndisplay:\n  backend: none\n"
+                   f"game_state_file: {tmp_path / 'game.json'}\n")
 
     async def _drive():
         board = SelfPlayBoard(human_color=_chess.WHITE, move_pause=0.0, transient_pause=0.0)
@@ -216,7 +217,8 @@ def test_slide_over_intermediate_is_not_committed(tmp_path):
     from chessnood.runner import Runner
 
     cfg = tmp_path / "c.yaml"
-    cfg.write_text("board:\n  backend: mock\n  settle_ms: 80\ndisplay:\n  backend: none\n")
+    cfg.write_text(f"board:\n  backend: mock\n  settle_ms: 80\ndisplay:\n  backend: none\n"
+                   f"game_state_file: {tmp_path / 'game.json'}\n")
 
     async def _run():
         board = MockBoard()
@@ -238,3 +240,38 @@ def test_slide_over_intermediate_is_not_committed(tmp_path):
     assert b.piece_at(chess.E4) is not None
     assert b.piece_at(chess.E3) is None
     assert b.move_stack and b.move_stack[0] == chess.Move.from_uci("e2e4")
+
+
+def test_snapshot_restore_roundtrip():
+    g = ChessGame(human_color=chess.BLACK)
+    g.board.push_uci("e2e4")
+    g.state = GameState.ENGINE_MOVE_SHOWN
+    g.pending_engine_move = chess.Move.from_uci("e7e5")
+    snap = g.snapshot()
+
+    g2 = ChessGame()
+    g2.restore(snap)
+    assert g2.board.fen() == g.board.fen()
+    assert g2.state == GameState.ENGINE_MOVE_SHOWN
+    assert g2.pending_engine_move == chess.Move.from_uci("e7e5")
+    assert g2.human_color == chess.BLACK
+
+
+def test_runner_resumes_saved_game(tmp_path):
+    import json
+    from chessnood.boards.mock import MockBoard
+    from chessnood.config import ConfigWatcher
+    from chessnood.runner import Runner
+
+    b = chess.Board()
+    b.push_uci("e2e4"); b.push_uci("e7e5")
+    state_file = tmp_path / "game.json"
+    state_file.write_text(json.dumps({
+        "fen": b.fen(), "state": "PLAYER_TURN", "pending": None, "human_color": "white"
+    }))
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(f"board:\n  backend: mock\ndisplay:\n  backend: none\n"
+                   f"game_state_file: {state_file}\n")
+    runner = Runner(MockBoard(), ConfigWatcher(str(cfg)))
+    assert runner._game.board.fen() == b.fen()
+    assert runner._game.state == GameState.PLAYER_TURN
