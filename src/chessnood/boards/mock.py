@@ -68,7 +68,7 @@ class SelfPlayBoard(Board):
     """
 
     def __init__(self, human_color: chess.Color = chess.WHITE,
-                 move_pause: float = 1.2, transient_pause: float = 0.35):
+                 move_pause: float = 1.2, transient_pause: float = 0.5):
         super().__init__()
         self._board = chess.Board()
         self._human_color = human_color
@@ -113,8 +113,13 @@ class SelfPlayBoard(Board):
                     move = random.choice(list(self._board.legal_moves))
                 else:
                     move = await self._await_engine_move()
-                    if move is None:
-                        break  # disconnected
+                    if not self._run:
+                        break
+                    if move is None:  # stalled (e.g. engine underpromotion); restart
+                        log.info("[demo] engine move didn't resolve; starting a new game")
+                        self._board.reset()
+                        self._emit(BoardReading.from_board(self._board))
+                        continue
                 await self._play_as_sequence(move)
         except asyncio.CancelledError:
             pass
@@ -124,15 +129,21 @@ class SelfPlayBoard(Board):
 
         Polling on legality (rather than an event) sidesteps races: a stale lit
         move from the previous turn won't be legal now, so it's simply skipped
-        until the Runner lights the genuine new engine move.
+        until the Runner lights the genuine new engine move. Returns None if no
+        legal lit move appears within a timeout -- the LED command can't express
+        an underpromotion piece, so such a move would never match; the caller
+        then just restarts the game.
         """
-        while self._run:
+        deadline = max(10.0, self._pause * 8)
+        waited = 0.0
+        while self._run and waited < deadline:
             if self._lit is not None:
                 move = self._match_move(self._lit[0], self._lit[1])
                 if move is not None:
                     self._lit = None
                     return move
             await asyncio.sleep(0.01)
+            waited += 0.01
         return None
 
     async def _play_as_sequence(self, move: chess.Move) -> None:

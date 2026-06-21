@@ -36,6 +36,13 @@ _STATUS_TEXT = {
 }
 
 
+def _board_from_pieces(pieces: dict) -> chess.Board:
+    """A board carrying just the sensed piece placement, for rendering."""
+    board = chess.Board()
+    board.set_piece_map(dict(pieces))
+    return board
+
+
 class Runner:
     def __init__(self, board: Board, watcher: ConfigWatcher):
         self._board = board
@@ -48,6 +55,9 @@ class Runner:
         self._new_game_requested = asyncio.Event()
         self._connection = board.state
         self._loop: asyncio.AbstractEventLoop | None = None
+        # the last position the board physically sensed (so the screen can show
+        # what's actually on the board, including a piece lifted mid-move)
+        self._sensed = chess.Board()
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -88,7 +98,7 @@ class Runner:
                 ConnectionState.ERROR: "Verbindung verloren",
             }.get(self._connection, "Nicht verbunden")
             self._display.update(UiModel(self._connection, status,
-                                         "Schalte das Brett ein und warte kurz.", self._game.board))
+                                         "Schalte das Brett ein und warte kurz.", self._sensed))
             return
         status, instruction = _STATUS_TEXT.get(self._game.state, ("", ""))
         if self._game.state == GameState.GAME_OVER:
@@ -97,8 +107,9 @@ class Runner:
         if self._game.state == GameState.ENGINE_MOVE_SHOWN and self._game.pending_engine_move:
             move = self._game.pending_engine_move
             highlight = [move.from_square, move.to_square]
+        # show the physically sensed position, so a piece lifted mid-move is visible
         self._display.update(UiModel(self._connection, status, instruction,
-                                     self._game.board, highlight))
+                                     self._sensed, highlight))
 
     def _game_over_text(self) -> str:
         outcome = self._game.board.outcome()
@@ -122,6 +133,7 @@ class Runner:
     async def _handle_readings(self, readings: "asyncio.Queue") -> None:
         while True:
             reading = await readings.get()
+            self._sensed = _board_from_pieces(reading.pieces)
             await self._apply(self._game.feed(reading))
 
     async def _apply(self, reaction: Reaction) -> None:
