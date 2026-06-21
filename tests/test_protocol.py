@@ -39,3 +39,13 @@ def test_led_encoding_sets_one_bit_per_square():
     assert len(rows) == 8
     # exactly two bits set across all rank bytes
     assert sum(bin(b).count("1") for b in rows) == 2
+
+
+def test_led_bit_layout_matches_community_libs():
+    # Confirmed against paulvonallwoerden/chessnut-air and rmarabini/chessnutair:
+    # rank 8 is byte 0 and rank 1 is byte 7; file a is the high bit (0x80).
+    rows = p.encode_leds([chess.A1, chess.H8])[2:]
+    assert rows[0] == 0x01   # h8: rank 8 -> byte 0, file h -> bit 0
+    assert rows[7] == 0x80   # a1: rank 1 -> byte 7, file a -> bit 7
+    # a8 should light the top bit of the first rank byte
+    assert p.encode_leds([chess.A8])[2] == 0x80

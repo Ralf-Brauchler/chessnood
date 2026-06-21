@@ -1,15 +1,20 @@
 """Chessnut BLE protocol: GATT UUIDs, board decoding, LED encoding.
 
-⚠️  HARDWARE VERIFICATION REQUIRED  ⚠️
-The constants and byte layouts below are taken from the publicly documented
-Chessnut protocol and community libraries (chessnutech/EasyLinkSDK,
-rmarabini/chessnutair, ecrucru/chessnut-connector). They are *best effort* and
-have NOT yet been confirmed against a physical Chessnut Pro.
+Constants below are cross-checked against multiple community libraries
+(chessnutech/EasyLinkSDK, rmarabini/chessnutair, paulvonallwoerden/chessnut-air,
+ecrucru/chessnut-connector). The following are CONFIRMED consistent across at
+least two independent implementations and so are no longer flagged:
+  * the write characteristic 1b7e8272..., read/data characteristic 1b7e8262...
+  * the init command 0x21 0x01 0x00
+  * the LED command header 0x0A 0x08 + 8 rank bytes, file a = high bit (0x80)
+  * the 32-byte board payload after a 2-byte header, low-nibble-first, and the
+    piece-code -> symbol map (identical in rmarabini/chessnutair)
 
-Everything that might need adjusting after the first hardware test is isolated
-here as a named constant or a single small function, so fixing it later is a
-one-line change. The places most likely to need tweaking are flagged with
-``# VERIFY``.
+Still UNVERIFIED on a physical Chessnut **Pro** specifically (the references are
+mostly for the Air, which shares the protocol) and flagged ``# VERIFY``:
+  * the exact board square ordering / orientation (rotation, file/rank origin)
+  * whether the Pro exposes LED control over BLE at all
+Each is isolated as a named constant or a one-line function for an easy fix.
 """
 from __future__ import annotations
 
@@ -18,26 +23,26 @@ from typing import Iterable
 import chess
 
 # --- GATT UUIDs -----------------------------------------------------------
-SERVICE_UUID = "1b7e8261-2877-41c3-b46e-cf057c562023"  # VERIFY
-READ_CHARACTERISTIC = "1b7e8262-2877-41c3-b46e-cf057c562023"   # notify: board state  # VERIFY
-WRITE_CHARACTERISTIC = "1b7e8272-2877-41c3-b46e-cf057c562023"  # write: commands/LEDs  # VERIFY
+SERVICE_UUID = "1b7e8261-2877-41c3-b46e-cf057c562023"
+READ_CHARACTERISTIC = "1b7e8262-2877-41c3-b46e-cf057c562023"   # notify: board state (confirmed)
+WRITE_CHARACTERISTIC = "1b7e8272-2877-41c3-b46e-cf057c562023"  # write: commands/LEDs (confirmed)
 
-# Command that puts the board into real-time streaming mode.
-INIT_REALTIME = bytes([0x21, 0x01, 0x00])  # VERIFY
+# Command that puts the board into real-time streaming mode. (confirmed)
+INIT_REALTIME = bytes([0x21, 0x01, 0x00])
 
-# LED command header; followed by 8 bytes (one per rank).
-LED_COMMAND = bytes([0x0A, 0x08])  # VERIFY
+# LED command header; followed by 8 bytes (one per rank). (confirmed)
+LED_COMMAND = bytes([0x0A, 0x08])
 
-# Board-state notification framing.
-DATA_OFFSET = 2   # first 2 bytes are a header  # VERIFY
+# Board-state notification framing. (confirmed: 2-byte header, 32 data bytes)
+DATA_OFFSET = 2
 DATA_LEN = 32     # 32 bytes -> 64 squares (2 squares per byte)
 
-# Piece code -> FEN symbol (upper = white). This quirky mapping comes from the
-# community reverse-engineering work; VERIFY each code against the real board.
+# Piece code -> FEN symbol (upper = white). Confirmed identical in
+# rmarabini/chessnutair's convertDict.
 _CODE_TO_SYMBOL: dict[int, str] = {
     1: "q", 2: "k", 3: "b", 4: "p", 5: "n", 6: "R",
     7: "P", 8: "r", 9: "B", 10: "N", 11: "Q", 12: "K",
-}  # VERIFY
+}  # confirmed (rmarabini/chessnutair)
 PIECE_BY_CODE: dict[int, chess.Piece] = {
     code: chess.Piece.from_symbol(sym) for code, sym in _CODE_TO_SYMBOL.items()
 }
@@ -92,10 +97,15 @@ def encode_board(pieces: dict[int, chess.Piece]) -> bytes:
 
 
 def encode_leds(squares: Iterable[int]) -> bytes:
-    """Build the LED command for the given python-chess squares."""
+    """Build the LED command for the given python-chess squares.
+
+    Layout confirmed against community libraries (paulvonallwoerden/chessnut-air,
+    rmarabini/chessnutair): 8 bytes, one per rank with rank 8 first; within a byte
+    file a is the high bit (0x80) and file h the low bit (0x01).
+    """
     rows = bytearray(8)
     for square in squares:
         stream = square_to_stream_index(square)
         stream_rank, file = divmod(stream, 8)
-        rows[stream_rank] |= 1 << file  # VERIFY (bit order per file)
+        rows[stream_rank] |= 1 << (7 - file)  # file a -> bit7 (0x80), file h -> bit0
     return LED_COMMAND + bytes(rows)

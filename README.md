@@ -98,7 +98,8 @@ the reverse-engineering work of the community, in particular:
 
 - [chessnutech/EasyLinkSDK](https://github.com/chessnutech/EasyLinkSDK) — the official SDK
 - [ecrucru/chessnut-connector](https://github.com/ecrucru/chessnut-connector)
-- [rmarabini/chessnutair](https://github.com/rmarabini/chessnutair)
+- [rmarabini/chessnutair](https://github.com/rmarabini/chessnutair) — confirmed our UUIDs, init/LED commands and piece-code map
+- [paulvonallwoerden/chessnut-air](https://github.com/paulvonallwoerden/chessnut-air) — confirmed the LED bit/byte layout
 - [staubsauger/ChessnutPy](https://github.com/staubsauger/ChessnutPy)
 
 Chess rules via [python-chess](https://github.com/niklasf/python-chess); opponent via [Stockfish](https://stockfishchess.org/).

@@ -1,8 +1,17 @@
 # Hardware verification (do this once, when the board is reachable)
 
-The Bluetooth protocol in `src/chessnood/boards/protocol.py` is implemented from
-public documentation but **has not yet been confirmed on a physical Chessnut Pro.**
-This checklist confirms it and tells you exactly what to tweak if something is off.
+The Bluetooth protocol in `src/chessnood/boards/protocol.py` has been **cross-checked
+against several community libraries** for the Chessnut **Air** (rmarabini/chessnutair,
+paulvonallwoerden/chessnut-air, chessnutech/EasyLinkSDK, ecrucru/chessnut-connector).
+The UUIDs, the init command, the LED command (header `0x0A 0x08` + 8 rank bytes,
+file a = high bit) and the 32-byte board payload + piece-code map all agree across
+implementations, so they are now treated as confirmed. What remains genuinely
+unverified on a physical **Pro** is only:
+  * the board's square **orientation** (rotation / file-rank origin), and
+  * whether the **Pro** exposes LED control over BLE at all (the references are
+    mostly for the Air, which shares the protocol).
+
+This checklist confirms those on real hardware and tells you exactly what to tweak.
 You can run all of this from a **Mac or Linux laptop** with Bluetooth — no Pi needed.
 
 ## 0. Install the BLE extra
