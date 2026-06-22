@@ -68,12 +68,20 @@ class SelfPlayBoard(Board):
     """
 
     def __init__(self, human_color: chess.Color = chess.WHITE,
-                 move_pause: float = 1.2, transient_pause: float = 0.5):
+                 move_pause: float = 1.2, transient_pause: float = 0.5,
+                 mistake_chance: float = 0.0, mistake_pause: float = 2.0):
         super().__init__()
         self._board = chess.Board()
         self._human_color = human_color
         self._pause = move_pause
         self._transient_pause = transient_pause
+        # How often a move is "fumbled" first (piece placed on a wrong square) so
+        # the self-healing guidance ("Das passt nicht" / "Fast …") shows live. The
+        # wrong position is held ``mistake_pause`` seconds -- it must exceed the
+        # runner's settle window so the bad reading actually commits and alerts,
+        # then the move is corrected.
+        self._mistake_chance = mistake_chance
+        self._mistake_pause = mistake_pause
         self._run = False
         self._task: asyncio.Task | None = None
         self._lit: tuple[int, int] | None = None  # last 2-square set_leds (engine move)
@@ -148,7 +156,8 @@ class SelfPlayBoard(Board):
         return None
 
     async def _play_as_sequence(self, move: chess.Move) -> None:
-        """Emit 'pieces lifted' (a transient) then the final position."""
+        """Emit 'pieces lifted' (a transient), maybe a fumble, then the final position."""
+        pre = self._board.copy(stack=False)         # position before the move (to test legality)
         before = dict(self._board.piece_map())
         self._board.push(move)
         after = dict(self._board.piece_map())
@@ -156,7 +165,38 @@ class SelfPlayBoard(Board):
         lifted = {sq: p for sq, p in before.items() if sq not in changed}
         self._emit(BoardReading(lifted))            # transient: ignored by the game
         await asyncio.sleep(self._transient_pause)
+        fumble = self._maybe_fumble(pre, before, move)
+        if fumble is not None:
+            log.info("[demo] fumbling: piece placed on a wrong square (shows the recovery UI)")
+            self._emit(BoardReading(fumble))        # held > settle -> alert, then corrected
+            await asyncio.sleep(self._mistake_pause)
         self._emit(BoardReading(after))             # the completed move
+
+    def _maybe_fumble(self, pre: chess.Board, before: dict[int, chess.Piece],
+                      move: chess.Move) -> dict[int, chess.Piece] | None:
+        """Sometimes return a *wrong* placement: the moving piece on an empty square
+        that is not its real destination, chosen so the game reads it as INVALID
+        (no legal move matches it) -- which is exactly what triggers the guidance.
+
+        Returns ``None`` to play the move cleanly (no fumble this time)."""
+        if self._mistake_chance <= 0 or random.random() >= self._mistake_chance:
+            return None
+        piece = before.get(move.from_square)
+        if piece is None:                           # shouldn't happen for a legal move
+            return None
+        # imported lazily to avoid an import cycle (game <- boards.base <- boards/__init__)
+        from ..game import Detection, detect_move
+
+        empties = [sq for sq in chess.SQUARES if sq not in before and sq != move.to_square]
+        random.shuffle(empties)
+        for wrong in empties:
+            candidate = dict(before)
+            del candidate[move.from_square]
+            candidate[wrong] = piece
+            detection, _ = detect_move(pre, BoardReading(candidate))
+            if detection == Detection.INVALID:
+                return candidate
+        return None
 
     def _match_move(self, frm: int, to: int) -> chess.Move | None:
         for m in self._board.legal_moves:

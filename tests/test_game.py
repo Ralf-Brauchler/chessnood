@@ -208,6 +208,54 @@ def test_selfplay_capture_emits_transient_then_final(tmp_path):
     assert out[-1].pieces[chess.D5] == chess.Piece.from_symbol("P")
 
 
+def test_selfplay_fumble_emits_a_wrong_position_then_corrects(tmp_path):
+    """With mistakes enabled, a move is played as lift -> wrong placement -> final,
+    and the wrong placement reads as INVALID (which triggers the recovery UI)."""
+    import asyncio
+    import chess as _chess
+    from chessnood.boards.mock import SelfPlayBoard
+    from chessnood.game import Detection as _Det, detect_move as _detect
+
+    async def _run():
+        # mistake_chance=1.0 -> always fumble; tiny pauses keep the test fast
+        board = SelfPlayBoard(move_pause=0.0, transient_pause=0.0,
+                              mistake_chance=1.0, mistake_pause=0.0)
+        readings = board.subscribe_readings()
+        pre = board._board.copy()
+        await board._play_as_sequence(_chess.Move.from_uci("e2e4"))
+        out = []
+        while not readings.empty():
+            out.append(readings.get_nowait())
+        return pre, out
+
+    pre, out = asyncio.run(_run())
+    assert len(out) == 3  # lift -> fumble -> final
+    # the fumble reads as INVALID on the pre-move board (no legal move matches it)
+    assert _detect(pre, out[1])[0] == _Det.INVALID
+    # ...and the final reading is the real, completed move
+    expected = pre.copy()
+    expected.push_uci("e2e4")
+    assert out[-1].pieces == expected.piece_map()
+
+
+def test_selfplay_fumble_disabled_by_default(tmp_path):
+    """Default (mistake_chance=0) plays cleanly: lift -> final, no wrong placement."""
+    import asyncio
+    import chess as _chess
+    from chessnood.boards.mock import SelfPlayBoard
+
+    async def _run():
+        board = SelfPlayBoard(move_pause=0.0, transient_pause=0.0)
+        readings = board.subscribe_readings()
+        await board._play_as_sequence(_chess.Move.from_uci("e2e4"))
+        out = []
+        while not readings.empty():
+            out.append(readings.get_nowait())
+        return out
+
+    assert len(asyncio.run(_run())) == 2  # transient then final, no fumble
+
+
 def test_slide_over_intermediate_is_not_committed(tmp_path):
     """Sliding a pawn over e3 to e4 must commit e2e4, not the transient e2e3."""
     import asyncio

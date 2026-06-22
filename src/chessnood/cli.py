@@ -50,7 +50,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
     watcher = ConfigWatcher(args.config)
     setup_logging(watcher.current.log_level)
     board = SelfPlayBoard(human_color=watcher.current.game.human_color_bool,
-                          move_pause=args.pause)
+                          move_pause=args.pause, mistake_chance=args.mistakes)
     runner = Runner(board, watcher)
     print(f"Demo: self-playing through the real UI (pause {args.pause}s). Ctrl-C to stop.")
     try:
@@ -176,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_demo = sub.add_parser("demo", help="self-playing dry-run on the real screen")
     p_demo.add_argument("--pause", type=float, default=1.2, help="seconds between moves")
+    p_demo.add_argument("--mistakes", type=float, default=0.3, metavar="P",
+                        help="probability [0..1] a move is fumbled first to show "
+                             "the recovery UI (0 = always play correctly)")
     p_demo.set_defaults(func=cmd_demo)
 
     p_sim = sub.add_parser("simulate", help="play a full game without hardware")

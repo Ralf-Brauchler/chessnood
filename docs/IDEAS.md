@@ -49,9 +49,13 @@ cue. Very senior-friendly.
 
 ---
 
-## Demo: let the mock make mistakes (showcase self-healing)
+## Demo: let the mock make mistakes (showcase self-healing) — DONE
 
-Teach the demo's `SelfPlayBoard` to occasionally fumble (place a piece on a wrong
-square, set up incorrectly) so the **self-healing / "Das passt nicht" guidance**
-can be seen live on the screen during dev — currently the mock only ever plays
-correctly, so the recovery UI never shows in the demo.
+`SelfPlayBoard` now optionally fumbles: before the correct final position it can
+emit a *wrong* placement (the moving piece on an empty, non-destination square,
+chosen via `detect_move` so it reads as INVALID), held `mistake_pause` seconds
+(> settle window) so it commits and the recovery UI shows, then corrects itself.
+Controlled by `mistake_chance` (constructor default 0 = always correct) and the
+`chessnood demo --mistakes P` flag (default 0.3). Verified live: a fumbled player
+move shows "Das passt nicht", a fumbled engine-move execution shows "Fast — bitte
+den leuchtenden Zug ausführen", both auto-recovering. Tests in test_game.py.
