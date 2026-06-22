@@ -198,6 +198,53 @@ class UsbBoard(Board):
             self._loop.call_soon_threadsafe(self._emit, reading)
 
 
+class DiagDevice:
+    """A thin synchronous wrapper for step-by-step hardware bring-up.
+
+    Deliberately bypasses the async :class:`UsbBoard` (no read thread, no
+    reconnect, no game logic) so each diagnostic command tests exactly one layer
+    of the interface. ``prefix`` toggles the leading ``0x00`` HID report-ID byte
+    that ``UsbBoard._write`` adds -- the one convention flagged ``# VERIFY``.
+    """
+
+    def __init__(self, dev, prefix: bool = True):
+        self._dev = dev
+        self.prefix = prefix
+
+    def write(self, payload: bytes) -> int:
+        data = (b"\x00" if self.prefix else b"") + payload
+        return self._dev.write(data)
+
+    def read(self, timeout_ms: int = 100) -> bytes:
+        return bytes(self._dev.read(256, timeout_ms))
+
+    def start_realtime(self) -> None:
+        self.write(CMD_REALTIME)
+
+    def close(self) -> None:
+        try:
+            self._dev.close()
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+
+
+def open_diag(prefix: bool = True) -> DiagDevice:
+    """Open the first attached Chessnut board for diagnostics.
+
+    Raises ``RuntimeError`` if no board is found (the CLI turns that into a
+    friendly message). ``import hid`` here so the dependency stays optional.
+    """
+    import hid
+
+    path = _find_device(hid)
+    if path is None:
+        raise RuntimeError("no Chessnut USB board found (is it plugged in and on?)")
+    dev = hid.device()
+    dev.open_path(path)
+    dev.set_nonblocking(False)
+    return DiagDevice(dev, prefix=prefix)
+
+
 def _find_device(hid) -> str | None:
     """Return the HID path of the first Chessnut board, or None."""
     for info in hid.enumerate(VENDOR_ID, 0):

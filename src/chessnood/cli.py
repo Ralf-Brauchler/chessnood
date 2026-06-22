@@ -6,6 +6,12 @@
   chessnood scan       list attached Chessnut USB boards (first hardware test)
   chessnood status     print what a running service is doing
   chessnood preview    render the touchscreen to a PNG to see how it looks
+
+Hardware bring-up (one layer at a time, see docs/HARDWARE.md):
+  chessnood dump       open + realtime + hex-dump raw HID reports
+  chessnood watch      live ASCII board from the decoded reports (orientation!)
+  chessnood led a1 …   light specific squares until Enter (LED mapping)
+  chessnood beep       sound one tone
 """
 from __future__ import annotations
 
@@ -13,6 +19,7 @@ import argparse
 import asyncio
 import random
 import sys
+import time
 
 import chess
 
@@ -124,6 +131,138 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ascii_board(pieces: dict) -> str:
+    """A plain 8x8 board (rank 8 at top, file a at left) of the sensed pieces."""
+    rows = []
+    for rank in range(7, -1, -1):
+        cells = [(pieces[sq].symbol() if (sq := chess.square(f, rank)) in pieces else ".")
+                 for f in range(8)]
+        rows.append(f"{rank + 1}  " + " ".join(cells))
+    rows.append("   " + " ".join("abcdefgh"))
+    return "\n".join(rows)
+
+
+def _diag_open(args: argparse.Namespace):
+    """Open the board for a diagnostic command, or print why we can't and None."""
+    try:
+        from .boards.usb import open_diag
+        return open_diag(prefix=not getattr(args, "no_prefix", False))
+    except ImportError:
+        print("hidapi not installed. Run:  pip install 'chessnood[usb]'", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - no board / permissions
+        print(f"Could not open the board: {exc}", file=sys.stderr)
+    return None
+
+
+def cmd_dump(args: argparse.Namespace) -> int:
+    """Rungs 2-3: open, start the realtime stream, hex-dump raw HID reports.
+
+    Proves the write path (the realtime command) and that the board streams
+    reports at all -- without trusting our decode. Watch the type (byte 0) and
+    length (byte 1) against docs/HARDWARE.md."""
+    dev = _diag_open(args)
+    if dev is None:
+        return 1
+    print(f"Realtime-Stream (prefix={'an' if dev.prefix else 'aus'}). "
+          f"Bewege Figuren; Ctrl-C zum Stoppen.\n")
+    n = 0
+    try:
+        dev.start_realtime()
+        deadline = time.monotonic() + args.seconds
+        while time.monotonic() < deadline:
+            data = dev.read(100)
+            if not data:
+                continue
+            n += 1
+            length = data[1] if len(data) > 1 else 0
+            print(f"#{n:04d} type=0x{data[0]:02x} len={length}  {data.hex(' ')}")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        dev.close()
+    print(f"\n{n} Reports empfangen.")
+    return 0 if n else 1
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Rungs 4-5: live ASCII board from the decoded reports.
+
+    Set the start position to check decoding; then put a *single* distinctive
+    piece on a known corner (e.g. one king on a1) to check orientation
+    unambiguously -- it must show up where you placed it."""
+    dev = _diag_open(args)
+    if dev is None:
+        return 1
+    from .boards.usb import (BOARD_DATA_LEN, BOARD_DATA_OFFSET, REPORT_BOARD,
+                             decode_board_report)
+    print("Live-Brett. Lege Figuren auf; Ctrl-C zum Stoppen.")
+    last = None
+    try:
+        dev.start_realtime()
+        deadline = time.monotonic() + args.seconds
+        while time.monotonic() < deadline:
+            data = dev.read(100)
+            if not data or data[0] != REPORT_BOARD or len(data) < BOARD_DATA_OFFSET + BOARD_DATA_LEN:
+                continue
+            pieces = decode_board_report(data)
+            if pieces == last:
+                continue
+            last = pieces
+            occ = ", ".join(f"{chess.square_name(s)}={p.symbol()}"
+                            for s, p in sorted(pieces.items())) or "(leer)"
+            print("\x1b[2J\x1b[H" + _ascii_board(pieces) + f"\n\nBesetzt: {occ}", flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        dev.close()
+    return 0
+
+
+def cmd_led(args: argparse.Namespace) -> int:
+    """Rungs 6-7: light the given squares until Enter, then clear.
+
+    Light a *single* corner (e.g. `chessnood led a1`) and check that exactly that
+    square lights on the board -- this nails the LED mapping/orientation. Use
+    --no-prefix to test the other HID report-ID convention."""
+    try:
+        squares = [chess.parse_square(s.lower()) for s in args.squares]
+    except ValueError:
+        print(f"Ungültiges Feld in {args.squares} (erwartet z.B. a1 h8).", file=sys.stderr)
+        return 1
+    dev = _diag_open(args)
+    if dev is None:
+        return 1
+    from .boards.usb import encode_leds
+    try:
+        dev.write(encode_leds(squares))
+        print(f"Leuchtet: {_squares(squares)}  (prefix={'an' if dev.prefix else 'aus'})")
+        print("Prüfe am Brett, dann Enter zum Ausschalten …")
+        try:
+            input()
+        except (EOFError, KeyboardInterrupt):
+            pass
+        dev.write(encode_leds([]))
+    finally:
+        dev.close()
+    return 0
+
+
+def cmd_beep(args: argparse.Namespace) -> int:
+    """Rung 8: sound one tone."""
+    dev = _diag_open(args)
+    if dev is None:
+        return 1
+    from .boards.usb import CMD_BEEP
+    f = max(0, min(0xFFFF, args.freq))
+    d = max(0, min(0xFFFF, args.ms))
+    try:
+        dev.write(CMD_BEEP + bytes([f >> 8, f & 0xFF, d >> 8, d & 0xFF]))
+        print(f"Beep gesendet: {f} Hz, {d} ms (prefix={'an' if dev.prefix else 'aus'})")
+    finally:
+        dev.close()
+    return 0
+
+
 def cmd_preview(args: argparse.Namespace) -> int:
     """Render the screen in a few states, stacked into one PNG, so you can see
     exactly what your father sees — no Pi or board needed."""
@@ -191,6 +330,32 @@ def main(argv: list[str] | None = None) -> int:
     p_sim.set_defaults(func=cmd_simulate)
 
     sub.add_parser("scan", help="list attached Chessnut USB boards").set_defaults(func=cmd_scan)
+
+    # --- hardware bring-up diagnostics (one layer at a time) ---
+    def _prefix_flag(p):
+        p.add_argument("--no-prefix", action="store_true",
+                       help="drop the leading 0x00 HID report-ID byte (try if writes are ignored)")
+
+    p_dump = sub.add_parser("dump", help="hex-dump raw HID reports (open + realtime)")
+    p_dump.add_argument("--seconds", type=float, default=20.0, help="how long to stream")
+    _prefix_flag(p_dump)
+    p_dump.set_defaults(func=cmd_dump)
+
+    p_watch = sub.add_parser("watch", help="live ASCII board from decoded reports")
+    p_watch.add_argument("--seconds", type=float, default=120.0, help="how long to watch")
+    _prefix_flag(p_watch)
+    p_watch.set_defaults(func=cmd_watch)
+
+    p_led = sub.add_parser("led", help="light squares until Enter (e.g. led a1 h8)")
+    p_led.add_argument("squares", nargs="+", help="squares to light, e.g. a1 e4 h8")
+    _prefix_flag(p_led)
+    p_led.set_defaults(func=cmd_led)
+
+    p_beep = sub.add_parser("beep", help="sound one tone")
+    p_beep.add_argument("--freq", type=int, default=1000, help="frequency in Hz")
+    p_beep.add_argument("--ms", type=int, default=200, help="duration in ms")
+    _prefix_flag(p_beep)
+    p_beep.set_defaults(func=cmd_beep)
 
     p_prev = sub.add_parser("preview", help="render the touchscreen to a PNG")
     p_prev.add_argument("--out", default="./chessnood-preview.png")
