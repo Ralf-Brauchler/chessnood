@@ -59,3 +59,60 @@ def test_led_bit_layout_matches_sdk():
     assert rows[7] == 0x80  # a1: rank 1 -> byte 7, file a -> bit 7
     assert rows[0] == 0x01  # h8: rank 8 -> byte 0, file h -> bit 0
     assert usb.encode_leds([chess.A8])[2] == 0x80  # a8 -> first byte, top bit
+
+
+def test_led_all_squares_and_empty():
+    assert usb.encode_leds([])[2:] == bytes(8)             # nothing lit -> all zero
+    assert usb.encode_leds(chess.SQUARES)[2:] == b"\xff" * 8  # every square lit
+
+
+def test_decode_ignores_empty_and_out_of_range_codes():
+    # a report that is all 0xFF: every nibble = 15, which is >= len(_CHESS_PIECES)
+    # (an invalid code) and must be skipped, not raise or invent pieces.
+    data = bytearray(usb.BOARD_DATA_OFFSET + usb.BOARD_DATA_LEN)
+    data[0] = usb.REPORT_BOARD
+    data[1] = usb.BOARD_DATA_LEN
+    for i in range(usb.BOARD_DATA_OFFSET, len(data)):
+        data[i] = 0xFF
+    assert usb.decode_board_report(bytes(data)) == {}
+
+
+class _FakeHid:
+    """Minimal stand-in for the hidapi module."""
+
+    def __init__(self, devices):
+        self._devices = devices
+
+    def enumerate(self, vid=0, pid=0):
+        return [d for d in self._devices if d["vendor_id"] == vid or vid == 0]
+
+
+def _pro_device():
+    return {"vendor_id": usb.VENDOR_ID, "product_id": 0x8123,
+            "usage_page": usb.USAGE_PAGE, "path": b"/dev/hidraw9",
+            "product_string": "Chessnut Pro"}
+
+
+def test_find_device_matches_pro_pid_and_usage_page():
+    hid = _FakeHid([_pro_device()])
+    assert usb._find_device(hid) == b"/dev/hidraw9"
+
+
+def test_find_device_skips_wrong_usage_page():
+    dev = _pro_device(); dev["usage_page"] = 0x0001  # not the vendor usage page
+    assert usb._find_device(_FakeHid([dev])) is None
+
+
+def test_find_device_none_when_absent():
+    other = {"vendor_id": usb.VENDOR_ID, "product_id": 0x9999,
+             "usage_page": usb.USAGE_PAGE, "path": b"/x"}
+    assert usb._find_device(_FakeHid([other])) is None
+
+
+def test_list_devices_uses_injected_hid(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "hid", _FakeHid([_pro_device()]))
+    found = usb.list_devices()
+    assert len(found) == 1
+    desc, pid = found[0]
+    assert "Chessnut Pro" in desc and pid == 0x8123

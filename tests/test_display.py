@@ -11,6 +11,9 @@ from chessnood.display import (
     Display,
     PreviewDisplay,
     UiModel,
+    _find_touch,
+    _pack,
+    _probe_framebuffer,
     make_display,
     point_in_button,
     render,
@@ -58,3 +61,39 @@ def test_new_game_handler_fires():
     disp.on_new_game(lambda: fired.append(True))
     disp._fire_new_game()
     assert fired == [True]
+
+
+def test_pack_rgb565_little_endian():
+    from PIL import Image
+    img = Image.new("RGB", (1, 1), (255, 0, 0))  # pure red
+    # RGB565: r=0xF8<<8 -> 0xF800, written little-endian
+    assert _pack(img, 16) == b"\x00\xf8"
+    assert len(_pack(Image.new("RGB", (2, 2)), 16)) == 2 * 2 * 2  # 2 bytes/pixel
+
+
+def test_pack_32bpp_is_rgbx():
+    from PIL import Image
+    out = _pack(Image.new("RGB", (1, 1), (255, 0, 0)), 32)
+    assert out == b"\xff\x00\x00\xff"            # R,G,B,X
+
+
+def test_probe_framebuffer_falls_back_when_missing(tmp_path):
+    size, bpp = _probe_framebuffer(str(tmp_path / "fbnope"))
+    assert size == (SCREEN_W, SCREEN_H) and bpp == 16
+
+
+class _FakeTouch:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_find_touch_matches_by_name():
+    devs = {"/dev/input/event0": "some-keyboard",
+            "/dev/input/event1": "ADS7846 Touchscreen"}
+    path = _find_touch(lambda: list(devs), lambda p: _FakeTouch(devs[p]))
+    assert path == "/dev/input/event1"
+
+
+def test_find_touch_none_when_no_match():
+    devs = {"/dev/input/event0": "Logitech Mouse"}
+    assert _find_touch(lambda: list(devs), lambda p: _FakeTouch(devs[p])) is None
