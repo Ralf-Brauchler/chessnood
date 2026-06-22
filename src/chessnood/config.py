@@ -6,12 +6,31 @@ takes effect on the next move without a restart.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
 import chess
 import yaml
+
+log = logging.getLogger(__name__)
+
+
+def _known(cls, data: Any) -> dict[str, Any]:
+    """Keep only the keys that are real fields of dataclass ``cls``.
+
+    A typo or stale key in config.yaml must NOT crash the appliance (it would
+    otherwise raise ``TypeError: unexpected keyword argument``). Unknown keys are
+    dropped with a warning so the board still starts with sensible values.
+    """
+    data = data or {}
+    allowed = {f.name for f in fields(cls)}
+    unknown = set(data) - allowed
+    if unknown:
+        log.warning("Ignoring unknown config keys for %s: %s",
+                    cls.__name__, ", ".join(sorted(unknown)))
+    return {k: v for k, v in data.items() if k in allowed}
 
 
 @dataclass
@@ -69,10 +88,10 @@ class Config:
     def from_dict(cls, data: dict[str, Any]) -> "Config":
         data = data or {}
         return cls(
-            engine=EngineConfig(**(data.get("engine") or {})),
-            board=BoardConfig(**(data.get("board") or {})),
-            display=DisplayConfig(**(data.get("display") or {})),
-            game=GameConfig(**(data.get("game") or {})),
+            engine=EngineConfig(**_known(EngineConfig, data.get("engine"))),
+            board=BoardConfig(**_known(BoardConfig, data.get("board"))),
+            display=DisplayConfig(**_known(DisplayConfig, data.get("display"))),
+            game=GameConfig(**_known(GameConfig, data.get("game"))),
             log_level=data.get("log_level", "info"),
             status_file=data.get("status_file", "./chessnood-status.json"),
             game_state_file=data.get("game_state_file", "./chessnood-game.json"),
@@ -80,14 +99,23 @@ class Config:
 
     @classmethod
     def load(cls, path: str | Path | None) -> "Config":
-        """Load config from ``path``. Missing file -> all defaults."""
+        """Load config from ``path``. Missing or unreadable/invalid -> defaults.
+
+        The appliance must always come up with *some* working config: a missing
+        file, a YAML syntax error or a half-written file falls back to defaults
+        (with a warning) rather than refusing to start.
+        """
         if path is None:
             return cls()
         p = Path(path)
         if not p.exists():
             return cls()
-        with p.open("r", encoding="utf-8") as fh:
-            return cls.from_dict(yaml.safe_load(fh) or {})
+        try:
+            with p.open("r", encoding="utf-8") as fh:
+                return cls.from_dict(yaml.safe_load(fh) or {})
+        except (OSError, yaml.YAMLError) as exc:
+            log.warning("Could not read config %s (%s); using defaults", p, exc)
+            return cls()
 
 
 class ConfigWatcher:
@@ -104,12 +132,26 @@ class ConfigWatcher:
         return Config.load(self.path)
 
     def poll(self) -> tuple[bool, Config]:
-        """Return (changed, config). Reloads only if the file's mtime changed."""
+        """Return (changed, config). Reloads only if the file's mtime changed.
+
+        A failed reload (file vanished or half-written/invalid YAML caught mid-save
+        over SSH) must never crash the running service nor silently reset it to
+        defaults -- we keep the last good config and try again on the next change.
+        """
         if not self.path or not self.path.exists():
             return False, self.current
-        mtime = self.path.stat().st_mtime
-        if mtime != self._mtime:
-            self._mtime = mtime
-            self.current = Config.load(self.path)
-            return True, self.current
-        return False, self.current
+        try:
+            mtime = self.path.stat().st_mtime
+        except OSError:
+            return False, self.current
+        if mtime == self._mtime:
+            return False, self.current
+        self._mtime = mtime  # advance first so a broken file isn't retried every poll
+        try:
+            with self.path.open("r", encoding="utf-8") as fh:
+                new = Config.from_dict(yaml.safe_load(fh) or {})
+        except (OSError, yaml.YAMLError) as exc:
+            log.warning("Config reload failed (%s); keeping current settings", exc)
+            return False, self.current
+        self.current = new
+        return True, self.current

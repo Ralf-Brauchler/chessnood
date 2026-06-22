@@ -58,12 +58,18 @@ class Engine:
                 log.debug("Engine option %s=%s not applied: %s", name, value, exc)
 
     def best_move(self, board: chess.Board) -> chess.Move:
-        if self._engine is None:
-            return random.choice(list(board.legal_moves))
-        limit = chess.engine.Limit(time=self._cfg.move_time_ms / 1000.0)
-        result = self._engine.play(board, limit)
-        assert result.move is not None
-        return result.move
+        if self._engine is not None:
+            limit = chess.engine.Limit(time=self._cfg.move_time_ms / 1000.0)
+            try:
+                result = self._engine.play(board, limit)
+                if result.move is not None:
+                    return result.move
+            except Exception as exc:  # noqa: BLE001 - engine may die mid-game
+                # A crashed/terminated engine must never brick the board: drop it
+                # and keep playing with the random fallback.
+                log.warning("Engine failed mid-game (%s); falling back to random moves", exc)
+                self.close()
+        return random.choice(list(board.legal_moves))
 
     def close(self) -> None:
         if self._engine is not None:
