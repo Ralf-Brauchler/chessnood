@@ -151,15 +151,19 @@ class SelfPlayBoard(Board):
             return True
 
         # Phase-A two-step: the source is lit -> lift it, then follow the
-        # destination LED and place the piece there.
+        # destination LED and place the piece there. We dwell on each step so the
+        # source-only and destination-only phases are actually watchable (a real
+        # hand doesn't lift/place the instant the LED lights).
         from_sq = lit[0]
         pieces = dict(self._board.piece_map())
         if from_sq not in pieces:
             return False
+        await asyncio.sleep(self._transient_pause)   # look at the lit source
         self._emit(BoardReading({sq: p for sq, p in pieces.items() if sq != from_sq}))
         lit = await self._wait_for_leds(other_than=from_sq)
         if lit is None or len(lit) != 1:
             return False
+        await asyncio.sleep(self._transient_pause)   # piece in hand, destination lit
         move = self._match_move(from_sq, lit[0])
         if move is None:
             return False

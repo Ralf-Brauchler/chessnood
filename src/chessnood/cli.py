@@ -49,8 +49,13 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
     watcher = ConfigWatcher(args.config)
     setup_logging(watcher.current.log_level)
+    # Scale the whole sequence off the one --pause knob so it can be slowed down
+    # for watching: the gap between moves, the in-hand dwell (also how long the
+    # one-square-at-a-time source/destination steps linger), and how long a
+    # fumble is held (must exceed settle_ms so the recovery UI actually shows).
     board = SelfPlayBoard(human_color=watcher.current.game.human_color_bool,
-                          move_pause=args.pause, mistake_chance=args.mistakes)
+                          move_pause=args.pause, transient_pause=args.pause * 0.5,
+                          mistake_chance=args.mistakes, mistake_pause=args.pause * 1.2)
     runner = Runner(board, watcher)
     print(f"Demo: self-playing through the real UI (pause {args.pause}s). Ctrl-C to stop.")
     try:
