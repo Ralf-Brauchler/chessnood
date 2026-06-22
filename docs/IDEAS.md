@@ -43,7 +43,18 @@ cue. Very senior-friendly.
   move; it could mirror the same sequential/animation logic.
 
 ### Suggested phasing
-1. Phase A: two-step (light source → on lift → light destination), no animation.
+1. ~~Phase A: two-step (light source → on lift → light destination), no animation.~~
+   **DONE.** For *simple* moves (no capture/castling/en passant/promotion),
+   `compute_guidance` now lights only the source ("Hebe die leuchtende Figur an.")
+   and, once it is lifted, only the destination ("Stelle die Figur auf das
+   leuchtende Feld."). The runner advances this **live** during `ENGINE_MOVE_SHOWN`
+   (`_show_sensed` → `_apply_guidance(beep=False)`), bypassing the settle window so
+   the LEDs follow the piece; the move still only *commits* after settling. Special
+   moves keep lighting all involved squares at once (that's Phase C). The demo's
+   `SelfPlayBoard` follows the lit squares (`_play_engine_move` / `_wait_for_leds`)
+   instead of inferring the move from two simultaneous LEDs. Verified live in the
+   demo (both clean play and the fumble/recovery path). Still LED-hardware-gated on
+   the real Pro; the screen mirrors the same sequence today.
 2. Phase B: add the marching-path animation.
 3. Phase C: sequential handling for castling / en passant / capture.
 

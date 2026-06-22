@@ -73,10 +73,18 @@ def test_setup_still_placing_is_not_alert():
     assert not gd.alert and chess.A1 in gd.highlight
 
 
-def test_engine_move_normal_lights_from_to():
+def test_engine_simple_move_guides_source_then_destination():
     g = _game(chess.STARTING_FEN, GameState.ENGINE_MOVE_SHOWN, pending="e2e4")
+    # step 1: source still on the board -> light only the source (pick it up)
     gd = compute_guidance(g, chess.Board())
-    assert set(gd.highlight) == {chess.E2, chess.E4}
+    assert gd.highlight == [chess.E2]
+    assert "Hebe" in gd.instruction and not gd.alert
+    # step 2: source lifted (e2 empty) -> light only the destination (place it)
+    lifted = chess.Board()
+    pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
+    gd = compute_guidance(g, lifted)
+    assert gd.highlight == [chess.E4]
+    assert "leuchtende Feld" in gd.instruction and not gd.alert
 
 
 def test_engine_castling_lights_king_and_rook():

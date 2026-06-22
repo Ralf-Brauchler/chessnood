@@ -153,20 +153,28 @@ class Runner:
         """
         while True:
             reading = await readings.get()
-            self._show_sensed(reading)
+            await self._show_sensed(reading)
             # absorb further readings until the board is quiet for settle_s
             while self._settle_s > 0:
                 try:
                     reading = await asyncio.wait_for(readings.get(), self._settle_s)
                 except asyncio.TimeoutError:
                     break
-                self._show_sensed(reading)
+                await self._show_sensed(reading)
             await self._apply(self._game.feed(reading))
 
-    def _show_sensed(self, reading) -> None:
-        """Reflect the physically sensed position on screen (live, uncommitted)."""
+    async def _show_sensed(self, reading) -> None:
+        """Reflect the physically sensed position on screen (live, uncommitted).
+
+        While the player is executing the computer's move we also advance the
+        guidance live -- so the LEDs follow the piece (source lit -> on lift ->
+        destination lit) without waiting for the board to settle. Other states
+        stay settle-gated to avoid flicker (e.g. a pawn sliding over a square)."""
         self._sensed = _board_from_pieces(reading.pieces)
-        self._refresh_screen()
+        if self._game.state == GameState.ENGINE_MOVE_SHOWN:
+            await self._apply_guidance(beep=False)
+        else:
+            self._refresh_screen()
 
     async def _apply(self, reaction: Reaction) -> None:
         """Carry out a game Reaction: recompute guidance, drive LEDs/screen, run engine."""
@@ -178,14 +186,19 @@ class Runner:
 
         # Work out what to show/say and which squares to light, then apply it to
         # the board LEDs (primary move indicator) and the screen together.
-        self._ui = compute_guidance(self._game, self._sensed)
-        await self._board.set_leds(self._ui.highlight)
-        await self._beep_on_transition()
-        self._refresh_screen()
+        await self._apply_guidance(beep=True)
         self._save_game()
 
         if reaction.engine_should_move:
             await self._do_engine_move()
+
+    async def _apply_guidance(self, *, beep: bool) -> None:
+        """Recompute guidance for the sensed position and drive LEDs + screen."""
+        self._ui = compute_guidance(self._game, self._sensed)
+        await self._board.set_leds(self._ui.highlight)
+        if beep:
+            await self._beep_on_transition()
+        self._refresh_screen()
 
     async def _beep_on_transition(self) -> None:
         """A short tone only when something newly needs the player's attention."""

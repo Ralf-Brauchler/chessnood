@@ -228,6 +228,14 @@ def _promotion_square_in_progress(game: chess.Board, sensed: chess.Board) -> int
     return None
 
 
+def _is_simple_move(game: chess.Board, move: chess.Move) -> bool:
+    """A plain move of one piece to an empty square -- no capture, castling, en
+    passant or promotion. Only these are guided one square at a time; the rest
+    light all involved squares at once (sequencing them is a later phase)."""
+    return not (game.is_castling(move) or game.is_en_passant(move)
+                or move.promotion or game.is_capture(move))
+
+
 def _engine_move_guidance(game: chess.Board, move: chess.Move) -> tuple[list[int], str]:
     """Squares to light and a plain instruction for executing the engine's move."""
     involved = [move.from_square, move.to_square]
@@ -276,14 +284,31 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board) -> Guidance:
 
     if state == GameState.ENGINE_MOVE_SHOWN and game.pending_engine_move is not None:
         move = game.pending_engine_move
-        involved, instr = _engine_move_guidance(board, move)
         expected = board.copy(stack=False)
         expected.push(move)
-        if sensed.piece_map() == expected.piece_map():
-            return Guidance("Der Computer hat gezogen", instr, involved)  # done
-        if _is_lift_of(sensed, board) or _is_lift_of(sensed, expected):
-            return Guidance("Der Computer hat gezogen", instr, involved)  # executing
-        return Guidance("Fast — bitte den leuchtenden Zug ausführen", instr, involved, alert=True)
+        done = sensed.piece_map() == expected.piece_map()
+        executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
+
+        # Special/complex moves keep lighting all involved squares at once.
+        if not _is_simple_move(board, move):
+            involved, instr = _engine_move_guidance(board, move)
+            if done or executing:
+                return Guidance("Der Computer hat gezogen", instr, involved)
+            return Guidance("Fast — bitte den leuchtenden Zug ausführen", instr, involved, alert=True)
+
+        # Simple move: guide one square at a time -- light the source, and once it
+        # has been lifted, light the destination. Less to interpret than two lit
+        # squares at once (which is "from", which is "to").
+        if done:
+            return Guidance("Der Computer hat gezogen", "Führe den leuchtenden Zug aus.")
+        if not executing:                              # a piece sits on a wrong square
+            return Guidance("Fast — bitte den leuchtenden Zug ausführen",
+                            "Stelle die Figur auf das leuchtende Feld.", [move.to_square], alert=True)
+        if move.from_square in sensed.piece_map():     # source still on the board
+            return Guidance("Der Computer hat gezogen", "Hebe die leuchtende Figur an.",
+                            [move.from_square])
+        return Guidance("Der Computer hat gezogen", "Stelle die Figur auf das leuchtende Feld.",
+                        [move.to_square])
 
     if state == GameState.GAME_OVER:
         return Guidance(_result_text_for(board),

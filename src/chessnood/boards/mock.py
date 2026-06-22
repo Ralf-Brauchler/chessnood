@@ -84,7 +84,7 @@ class SelfPlayBoard(Board):
         self._mistake_pause = mistake_pause
         self._run = False
         self._task: asyncio.Task | None = None
-        self._lit: tuple[int, int] | None = None  # last 2-square set_leds (engine move)
+        self._lit_squares: list[int] = []  # last squares the Runner asked to light
 
     async def connect(self) -> None:
         self._set_state(ConnectionState.CONNECTED)
@@ -99,10 +99,10 @@ class SelfPlayBoard(Board):
         self._set_state(ConnectionState.DISCONNECTED)
 
     async def set_leds(self, squares: Iterable[int]) -> None:
-        sq = list(squares)
-        # The engine move's from/to are always the first two lit squares (extra
-        # squares may follow for castling/en passant). One square = a fix hint.
-        self._lit = (sq[0], sq[1]) if len(sq) >= 2 else None
+        # We learn the computer's move by *following* the lit squares: a simple
+        # move lights the source, then (once we lift it) the destination -- one at
+        # a time; a special move lights all involved squares at once.
+        self._lit_squares = list(squares)
 
     async def _drive(self) -> None:
         try:
@@ -119,38 +119,71 @@ class SelfPlayBoard(Board):
 
                 await asyncio.sleep(self._pause)
                 if self._board.turn == self._human_color:
-                    move = random.choice(list(self._board.legal_moves))
-                else:
-                    move = await self._await_engine_move()
+                    await self._play_as_sequence(random.choice(list(self._board.legal_moves)))
+                elif not await self._play_engine_move():
                     if not self._run:
                         break
-                    if move is None:  # stalled (e.g. engine underpromotion); restart
-                        log.info("[demo] engine move didn't resolve; starting a new game")
-                        self._board.reset()
-                        self._emit(BoardReading.from_board(self._board))
-                        continue
-                await self._play_as_sequence(move)
+                    # couldn't follow the lit move (timeout / underpromotion); restart
+                    log.info("[demo] engine move didn't resolve; starting a new game")
+                    self._board.reset()
+                    self._emit(BoardReading.from_board(self._board))
         except asyncio.CancelledError:
             pass
 
-    async def _await_engine_move(self) -> chess.Move | None:
-        """Wait until the Runner lights a move that is legal on the current board.
+    async def _play_engine_move(self) -> bool:
+        """Play the computer's move by following the squares the Runner lights.
 
-        Polling on legality (rather than an event) sidesteps races: a stale lit
-        move from the previous turn won't be legal now, so it's simply skipped
-        until the Runner lights the genuine new engine move. Returns None if no
-        legal lit move appears within a timeout -- the LED command can't express
-        an underpromotion piece, so such a move would never match; the caller
-        then just restarts the game.
+        Polling on what's lit (rather than an event) sidesteps races: a stale
+        highlight from the previous turn won't yield a legal move, so it's skipped
+        until the genuine new move is shown. Returns False if nothing usable gets
+        lit in time -- e.g. an underpromotion, which the one-square LED cue can't
+        express; the caller then just restarts the game.
         """
+        lit = await self._wait_for_leds()
+        if lit is None:
+            return False
+        if len(lit) >= 2:
+            # special move (castling / en passant / capture): all squares at once
+            move = self._match_move(lit[0], lit[1])
+            if move is None:
+                return False
+            await self._play_as_sequence(move)
+            return True
+
+        # Phase-A two-step: the source is lit -> lift it, then follow the
+        # destination LED and place the piece there.
+        from_sq = lit[0]
+        pieces = dict(self._board.piece_map())
+        if from_sq not in pieces:
+            return False
+        self._emit(BoardReading({sq: p for sq, p in pieces.items() if sq != from_sq}))
+        lit = await self._wait_for_leds(other_than=from_sq)
+        if lit is None or len(lit) != 1:
+            return False
+        move = self._match_move(from_sq, lit[0])
+        if move is None:
+            return False
+        pre = self._board.copy(stack=False)
+        before = dict(self._board.piece_map())
+        self._board.push(move)
+        fumble = self._maybe_fumble(pre, before, move)
+        if fumble is not None:
+            log.info("[demo] fumbling the computer's move (shows the recovery UI)")
+            self._emit(BoardReading(fumble))           # held > settle -> alert, then corrected
+            await asyncio.sleep(self._mistake_pause)
+        self._emit(BoardReading.from_board(self._board))
+        return True
+
+    async def _wait_for_leds(self, other_than: int | None = None) -> list[int] | None:
+        """Wait until the Runner lights something (optionally a square other than
+        ``other_than``, so we can wait for the *destination* after lighting the
+        source). Returns the lit squares, or None on timeout."""
         deadline = max(10.0, self._pause * 8)
         waited = 0.0
         while self._run and waited < deadline:
-            if self._lit is not None:
-                move = self._match_move(self._lit[0], self._lit[1])
-                if move is not None:
-                    self._lit = None
-                    return move
+            lit = list(self._lit_squares)
+            if lit and lit != [other_than]:
+                return lit
             await asyncio.sleep(0.01)
             waited += 0.01
         return None
