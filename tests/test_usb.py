@@ -116,3 +116,57 @@ def test_list_devices_uses_injected_hid(monkeypatch):
     assert len(found) == 1
     desc, pid = found[0]
     assert "Chessnut Pro" in desc and pid == 0x8123
+
+
+def test_set_leds_skips_redundant_writes():
+    import asyncio
+
+    board = usb.UsbBoard()
+    writes = []
+    board._write = lambda payload: writes.append(payload)  # capture, no hardware
+
+    async def go():
+        await board.set_leds([chess.E2, chess.E4])
+        await board.set_leds([chess.E2, chess.E4])   # identical -> skipped
+        await board.set_leds([chess.D2])             # different -> written
+
+    asyncio.run(go())
+    assert len(writes) == 2
+    assert writes[0] == usb.encode_leds([chess.E2, chess.E4])
+    assert writes[1] == usb.encode_leds([chess.D2])
+
+
+def test_led_dedup_resets_so_same_squares_resend_after_reconnect():
+    import asyncio
+
+    board = usb.UsbBoard()
+    writes = []
+    board._write = lambda payload: writes.append(payload)
+
+    async def go():
+        await board.set_leds([chess.E2])
+        board._last_led_payload = None     # what a fresh connection does
+        await board.set_leds([chess.E2])   # must go through again (board LEDs were reset)
+
+    asyncio.run(go())
+    assert len(writes) == 2
+
+
+class _FailingDev:
+    """A device whose write() raises, but stays 'connected' (no disconnect)."""
+
+    def write(self, data):
+        raise OSError("pipe error")
+
+    def close(self):
+        pass
+
+
+def test_failed_led_write_invalidates_dedup_cache():
+    # If a write fails while the link stays up, the LED state is unknown -- the
+    # next identical set_leds must be re-sent, not skipped by the dedup cache.
+    board = usb.UsbBoard()
+    board._dev = _FailingDev()
+    board._last_led_payload = usb.encode_leds([chess.E2])  # pretend we sent e2
+    board._write(usb.encode_leds([chess.E2]))              # fails internally
+    assert board._last_led_payload is None                 # cache dropped -> will resend

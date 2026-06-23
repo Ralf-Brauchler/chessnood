@@ -1,13 +1,20 @@
 [Unit]
 Description=chessnood headless chess computer
-After=bluetooth.target
-Wants=bluetooth.target
+# No ordering dependency on the board: the app scans and reconnects on its own,
+# so it can start before the USB board is enumerated (or even plugged in).
+# Don't hammer a board that fails to start: cap restarts within a window.
+StartLimitIntervalSec=120
+StartLimitBurst=10
 
 [Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/chessnood
-ExecStart=/home/pi/chessnood/.venv/bin/chessnood run -c /home/pi/chessnood/config.yaml
+# Type=notify + WatchdogSec: the app pings the watchdog from its event loop, so a
+# hung (not just crashed) loop is detected and restarted. The User/WorkingDirectory
+# below are filled in by install_pi.sh for the deploying account (not hardcoded 'pi').
+Type=notify
+WatchdogSec=30
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/.venv/bin/chessnood run -c __DIR__/config.yaml
 Restart=always
 RestartSec=3
 # Logs go to the journal: view with `journalctl -fu chessnood`

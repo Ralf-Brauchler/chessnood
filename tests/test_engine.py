@@ -61,3 +61,40 @@ def test_engine_crash_mid_game_falls_back_to_random():
     assert move in set(chess.Board().legal_moves)   # still produced a legal move
     assert eng._engine is None                # dead engine dropped; later moves use fallback
     eng.close()
+
+
+def test_engine_recovers_after_backoff(monkeypatch):
+    # A transient failure must not leave the computer playing random forever:
+    # once the backoff elapses, best_move retries the binary.
+    eng = _missing_engine()
+    assert eng._engine is None                # binary missing -> currently degraded
+
+    opened = {"count": 0}
+
+    def fake_open():
+        opened["count"] += 1
+        eng._engine = object()                # pretend the retry succeeded
+
+    monkeypatch.setattr(eng, "_open", fake_open)
+
+    # Still within the backoff window -> no retry yet.
+    eng._next_retry = float("inf")
+    eng.best_move(chess.Board())
+    assert opened["count"] == 0
+
+    # Backoff elapsed -> exactly one retry attempt.
+    eng._next_retry = 0.0
+    eng._engine = None
+    eng.best_move(chess.Board())
+    assert opened["count"] == 1
+
+
+def test_engine_retry_is_rate_limited(monkeypatch):
+    # Two moves in quick succession must not spawn two retries.
+    eng = _missing_engine()
+    opened = {"count": 0}
+    monkeypatch.setattr(eng, "_open", lambda: opened.__setitem__("count", opened["count"] + 1))
+    eng._next_retry = 0.0
+    eng.best_move(chess.Board())
+    eng.best_move(chess.Board())              # _open left _engine None; backoff now in future
+    assert opened["count"] == 1

@@ -15,6 +15,9 @@ board:
   settle_ms: 1000        # a move counts only after the board is stable this long;
                          # ignores pieces slid over intermediate squares. Lower = snappier.
   beeps: true            # short tones on the board: your turn / wrong move / game over
+  stale_timeout_s: 0     # 0 = off. >0: reconnect if no board report arrives for this
+                         # long (recovers a wedged-but-still-plugged board). Enable
+                         # only once confirmed the board streams continuously.
 
 game:
   human_color: white     # which colour your father plays: white | black

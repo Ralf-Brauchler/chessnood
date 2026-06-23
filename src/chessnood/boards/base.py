@@ -62,10 +62,18 @@ class Board(ABC):
     # --- readings ---------------------------------------------------------
     def _emit(self, reading: BoardReading) -> None:
         for q in self._reading_subs:
+            # Only the latest board state matters; if a consumer falls behind,
+            # drop the oldest reading rather than letting the queue grow without
+            # bound. (The runner debounces anyway, so a stale reading is useless.)
+            if q.full():
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
             q.put_nowait(reading)
 
-    def subscribe_readings(self) -> "asyncio.Queue[BoardReading]":
-        q: asyncio.Queue[BoardReading] = asyncio.Queue()
+    def subscribe_readings(self, maxsize: int = 64) -> "asyncio.Queue[BoardReading]":
+        q: asyncio.Queue[BoardReading] = asyncio.Queue(maxsize=maxsize)
         self._reading_subs.append(q)
         return q
 

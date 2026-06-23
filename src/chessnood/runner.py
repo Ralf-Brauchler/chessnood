@@ -17,12 +17,14 @@ from pathlib import Path
 
 import chess
 
+from .atomicio import atomic_write_text
 from .boards.base import Board, ConnectionState
 from .config import ConfigWatcher
 from .display import UiModel, make_display
 from .engine import Engine
 from .game import ChessGame, GameState, Guidance, Reaction, compute_guidance
 from .status import StatusFile
+from . import watchdog
 
 log = logging.getLogger(__name__)
 
@@ -71,10 +73,15 @@ class Runner:
         if self._game.state == GameState.ENGINE_THINKING:
             asyncio.create_task(self._do_engine_move())
 
+        # Tell systemd we're up; a hung loop then stops petting the watchdog and
+        # gets restarted (see Type=notify + WatchdogSec in the service unit).
+        watchdog.notify_ready()
+
         tasks = [
             asyncio.create_task(self._handle_states(states)),
             asyncio.create_task(self._handle_readings(readings)),
             asyncio.create_task(self._handle_new_game()),
+            asyncio.create_task(watchdog.heartbeat()),
         ]
         try:
             await asyncio.gather(*tasks)
@@ -99,7 +106,7 @@ class Runner:
         if not self._game_file:
             return
         try:
-            self._game_file.write_text(json.dumps(self._game.snapshot(), indent=2), encoding="utf-8")
+            atomic_write_text(self._game_file, json.dumps(self._game.snapshot(), indent=2))
         except OSError:
             pass
 

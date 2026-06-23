@@ -86,14 +86,22 @@ def encode_leds(squares: Iterable[int]) -> bytes:
 
 
 class UsbBoard(Board):
-    def __init__(self) -> None:
+    def __init__(self, stale_timeout_s: float = 0.0) -> None:
         super().__init__()
         self._dev = None              # hid.device
-        self._lock = threading.Lock()  # serialise device access (read vs write)
+        self._lock = threading.Lock()        # guards the device handle (held briefly)
+        self._write_lock = threading.Lock()  # serialises writers + the >=200ms throttle
         self._run = False
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_write = 0.0
+        self._last_led_payload: bytes | None = None
+        # If > 0, force a reconnect after this many seconds without a board report
+        # (catches a board whose firmware/USB wedged but stays enumerated, so the
+        # app would otherwise sit on a dead "connected" link forever). Off by
+        # default until we confirm the Pro streams reports continuously in
+        # realtime mode -- otherwise a long think would falsely trip it.  # VERIFY
+        self._stale_timeout_s = stale_timeout_s
 
     async def connect(self) -> None:
         """Start the background read/reconnect loop and return immediately."""
@@ -115,6 +123,12 @@ class UsbBoard(Board):
 
     async def set_leds(self, squares: Iterable[int]) -> None:
         payload = encode_leds(squares)
+        # Skip redundant writes: during a guided move set_leds fires on every
+        # reading, mostly with the same squares. Re-sending wastes the 200ms
+        # write budget and starves reads for no change on the board.
+        if payload == self._last_led_payload:
+            return
+        self._last_led_payload = payload
         await asyncio.to_thread(self._write, payload)
 
     async def beep(self, frequency_hz: int = 1000, duration_ms: int = 150) -> None:
@@ -153,17 +167,25 @@ class UsbBoard(Board):
         dev.set_nonblocking(False)
         with self._lock:
             self._dev = dev
+        # A fresh link: the board's LEDs are off and the dedup cache is stale, so
+        # let the next set_leds through unconditionally.
+        self._last_led_payload = None
         self._write(CMD_REALTIME)
         self._post_state(ConnectionState.CONNECTED)
         log.info("Connected to board over USB")
 
+        last_rx = time.monotonic()
         while self._run:
             with self._lock:
                 if self._dev is None:
                     return
                 data = self._dev.read(256, 100)  # 100 ms timeout
             if not data:
+                if self._stale_timeout_s and time.monotonic() - last_rx > self._stale_timeout_s:
+                    log.warning("No board report for %.0fs; reconnecting", self._stale_timeout_s)
+                    return  # _maintain reconnects
                 continue
+            last_rx = time.monotonic()
             if data[0] == REPORT_BOARD and len(data) >= BOARD_DATA_OFFSET + BOARD_DATA_LEN:
                 try:
                     pieces = decode_board_report(bytes(data))
@@ -176,16 +198,24 @@ class UsbBoard(Board):
         # hidapi expects a leading report-ID byte (0x00 = unnumbered reports). The
         # SDK uses raw C hid_write; on Linux hidraw the 0x00 prefix is the correct
         # equivalent.  # VERIFY on hardware: drop the prefix if writes are ignored.
-        with self._lock:
-            if self._dev is None:
-                return
+        #
+        # _write_lock serialises writers and the >=200ms inter-write throttle; the
+        # throttle sleep is held *outside* the device lock so it can't block the
+        # read thread (which only needs the device lock, held briefly).
+        with self._write_lock:
             since = time.monotonic() - self._last_write
             if since < WRITE_INTERVAL_S:
                 time.sleep(WRITE_INTERVAL_S - since)
-            try:
-                self._dev.write(b"\x00" + payload)
-            except Exception as exc:  # noqa: BLE001
-                log.debug("USB write failed: %s", exc)
+            with self._lock:
+                if self._dev is None:
+                    return
+                try:
+                    self._dev.write(b"\x00" + payload)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("USB write failed: %s", exc)
+                    # The board's LED state is now unknown -- drop the dedup cache
+                    # so the next set_leds is resent rather than wrongly skipped.
+                    self._last_led_payload = None
             self._last_write = time.monotonic()
 
     # --- marshal back onto the event loop ---------------------------------

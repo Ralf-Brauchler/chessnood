@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 
 import chess
 import chess.engine
@@ -16,11 +17,17 @@ from .config import EngineConfig
 
 log = logging.getLogger(__name__)
 
+# After a failed/crashed engine we retry the binary rather than degrading to
+# random moves forever -- but not on *every* move, so a permanently broken path
+# doesn't spam the log or stall each turn. One retry per this many seconds.
+REOPEN_BACKOFF_S = 60.0
+
 
 class Engine:
     def __init__(self, cfg: EngineConfig):
         self._cfg = cfg
         self._engine: chess.engine.SimpleEngine | None = None
+        self._next_retry = 0.0
         self._open()
 
     def _open(self) -> None:
@@ -35,6 +42,16 @@ class Engine:
                 exc,
             )
             self._engine = None
+            self._next_retry = time.monotonic() + REOPEN_BACKOFF_S
+
+    def _maybe_reopen(self) -> None:
+        """Try to bring a crashed/never-started engine back, at most once per
+        backoff window. A transient Stockfish hiccup must not leave the computer
+        playing random moves for the rest of the appliance's uptime."""
+        if self._engine is None and time.monotonic() >= self._next_retry:
+            self._next_retry = time.monotonic() + REOPEN_BACKOFF_S
+            log.info("Retrying engine '%s'", self._cfg.path)
+            self._open()
 
     def configure(self, cfg: EngineConfig) -> None:
         """Apply (possibly changed) settings. Safe to call between moves."""
@@ -58,6 +75,7 @@ class Engine:
                 log.debug("Engine option %s=%s not applied: %s", name, value, exc)
 
     def best_move(self, board: chess.Board) -> chess.Move:
+        self._maybe_reopen()
         if self._engine is not None:
             limit = chess.engine.Limit(time=self._cfg.move_time_ms / 1000.0)
             try:
@@ -69,6 +87,7 @@ class Engine:
                 # and keep playing with the random fallback.
                 log.warning("Engine failed mid-game (%s); falling back to random moves", exc)
                 self.close()
+                self._next_retry = time.monotonic() + REOPEN_BACKOFF_S
         return random.choice(list(board.legal_moves))
 
     def close(self) -> None:

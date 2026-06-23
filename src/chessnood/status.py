@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .atomicio import atomic_write_text
+
 
 class StatusFile:
     def __init__(self, path: str | Path):
@@ -22,7 +24,7 @@ class StatusFile:
         self._data.update(fields)
         self._data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
-            self.path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
+            atomic_write_text(self.path, json.dumps(self._data, indent=2))
         except OSError:
             pass
 

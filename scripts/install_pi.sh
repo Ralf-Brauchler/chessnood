@@ -21,8 +21,11 @@ echo ">> Installing udev rule for USB board access..."
 sudo cp scripts/99-chessnut.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger
 
-echo ">> Installing systemd service..."
-sudo cp systemd/chessnood.service /etc/systemd/system/chessnood.service
+echo ">> Installing systemd service (rendered for user '$(whoami)' at $PWD)..."
+# Fill in the deploying user and project dir, so it works regardless of username
+# (the Pi user here is not 'pi'). __USER__/__DIR__ are placeholders in the unit.
+sed -e "s|__USER__|$(whoami)|g" -e "s|__DIR__|$PWD|g" \
+    systemd/chessnood.service | sudo tee /etc/systemd/system/chessnood.service >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable chessnood.service
 
