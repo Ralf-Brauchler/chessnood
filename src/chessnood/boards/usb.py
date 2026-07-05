@@ -39,6 +39,11 @@ CMD_REALTIME = bytes([0x21, 0x01, 0x00])   # switch to real-time board streaming
 CMD_LED = bytes([0x0A, 0x08])              # + 8 rank bytes
 CMD_BEEP = bytes([0x0B, 0x04])             # + freq (2 bytes) + duration ms (2 bytes)
 WRITE_INTERVAL_S = 0.2                      # SDK enforces >=200ms between writes
+# The Pro auto-clears its LEDs shortly after a write (verified on hardware: a
+# single write never stays visibly lit; re-sending every ~0.25s holds it solid).
+# The read loop refreshes the current pattern this often to keep it lit through a
+# long think.  # VERIFY interval on hardware if the LEDs flicker.
+LED_REFRESH_S = 0.25
 
 # Report framing (EasyLinkSDK read thread + toFen).
 REPORT_BOARD = 0x01    # readBuf[0] for a board-state report
@@ -83,6 +88,9 @@ def encode_leds(squares: Iterable[int]) -> bytes:
         file = chess.square_file(square)  # 0 = file a
         rows[7 - rank] |= 1 << (7 - file)
     return CMD_LED + bytes(rows)
+
+
+_LED_OFF = CMD_LED + bytes(8)  # all ranks 0 -> every LED off
 
 
 class UsbBoard(Board):
@@ -175,7 +183,17 @@ class UsbBoard(Board):
         log.info("Connected to board over USB")
 
         last_rx = time.monotonic()
+        last_led_refresh = 0.0
+        last_pieces: dict[int, chess.Piece] | None = None
         while self._run:
+            # Re-send the current LED pattern periodically: the board auto-clears
+            # its LEDs, so a lit square would otherwise fade during a long think.
+            # Skipped when nothing is lit (payload None/unknown or all-off).
+            led = self._last_led_payload
+            if led and led != _LED_OFF and \
+                    time.monotonic() - last_led_refresh >= LED_REFRESH_S:
+                self._write(led)
+                last_led_refresh = time.monotonic()
             with self._lock:
                 if self._dev is None:
                     return
@@ -192,7 +210,14 @@ class UsbBoard(Board):
                 except Exception as exc:  # noqa: BLE001
                     log.debug("Failed to decode board report: %s", exc)
                     continue
-                self._post_reading(BoardReading(pieces))
+                # The Pro streams the board state continuously (~5-10x/s), not
+                # only on change. Post only when the position actually changes, so
+                # the runner's "stable for settle_s" debounce sees a real gap and
+                # commits the move -- otherwise the endless stream never settles
+                # and nothing is ever fed to the game.
+                if pieces != last_pieces:
+                    last_pieces = pieces
+                    self._post_reading(BoardReading(pieces))
 
     def _write(self, payload: bytes) -> None:
         # hidapi expects a leading report-ID byte (0x00 = unnumbered reports). The
@@ -276,12 +301,26 @@ def open_diag(prefix: bool = True) -> DiagDevice:
 
 
 def _find_device(hid) -> str | None:
-    """Return the HID path of the first Chessnut board, or None."""
-    for info in hid.enumerate(VENDOR_ID, 0):
-        if (info["product_id"] & PRODUCT_ID_MASK) in PRODUCT_IDS and \
-                info.get("usage_page") == USAGE_PAGE:
+    """Return the HID path of the first Chessnut board, or None.
+
+    On macOS/Windows hidapi reports the vendor usage page (0xFF00), which picks
+    the control interface out of the board's several HID collections. On Linux
+    the hidraw backend reports usage_page 0 (verified on a Pro: a single
+    interface, usage_page 0x0000 -- see docs/HARDWARE.md rung 1), so there we
+    can only match on the product id, the same filter ``scan`` uses.
+    """
+    candidates = [
+        info for info in hid.enumerate(VENDOR_ID, 0)
+        if (info["product_id"] & PRODUCT_ID_MASK) in PRODUCT_IDS
+    ]
+    if not candidates:
+        return None
+    # Prefer the vendor interface when the platform exposes usage pages;
+    # otherwise (Linux) fall back to the sole product match.
+    for info in candidates:
+        if info.get("usage_page") == USAGE_PAGE:
             return info["path"]
-    return None
+    return candidates[0]["path"]
 
 
 def list_devices() -> list[tuple[str, int]]:

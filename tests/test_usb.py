@@ -98,9 +98,20 @@ def test_find_device_matches_pro_pid_and_usage_page():
     assert usb._find_device(hid) == b"/dev/hidraw9"
 
 
-def test_find_device_skips_wrong_usage_page():
-    dev = _pro_device(); dev["usage_page"] = 0x0001  # not the vendor usage page
-    assert usb._find_device(_FakeHid([dev])) is None
+def test_find_device_prefers_vendor_usage_page():
+    # macOS/Windows expose several HID collections; pick the vendor one (0xFF00)
+    # over e.g. the board's keyboard interface.
+    keyboard = _pro_device(); keyboard["usage_page"] = 0x0001
+    keyboard["path"] = b"/dev/hidraw8"
+    vendor = _pro_device()  # usage_page = USAGE_PAGE, path /dev/hidraw9
+    assert usb._find_device(_FakeHid([keyboard, vendor])) == b"/dev/hidraw9"
+
+
+def test_find_device_falls_back_when_usage_page_absent():
+    # Linux hidraw reports usage_page 0 (verified on a Pro); match on the product
+    # id alone rather than dropping the board.
+    dev = _pro_device(); dev["usage_page"] = 0x0000
+    assert usb._find_device(_FakeHid([dev])) == b"/dev/hidraw9"
 
 
 def test_find_device_none_when_absent():
