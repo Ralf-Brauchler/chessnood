@@ -15,5 +15,5 @@ def build_board(cfg: BoardConfig) -> Board:
     if cfg.backend == "usb":
         from .usb import UsbBoard  # imported lazily so hidapi stays optional
 
-        return UsbBoard(stale_timeout_s=cfg.stale_timeout_s)
+        return UsbBoard(stale_timeout_s=cfg.stale_timeout_s, animate=cfg.led_animation)
     raise ValueError(f"unknown board backend: {cfg.backend!r}")
