@@ -33,16 +33,46 @@ def test_lifted_piece_is_not_an_error():
     assert gd.status == "Du bist am Zug" and not gd.alert
 
 
-def test_wrong_placement_triggers_fix_guidance():
+def test_wrong_placement_lights_one_square_at_a_time():
+    """A wrong position is fixed one LED at a time, not the whole diff at once."""
     g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
     sensed = chess.Board()
     pm = sensed.piece_map()
     pm[chess.E5] = pm.pop(chess.E2)                # pawn teleported to a non-legal spot
     sensed.set_piece_map(pm)
+    # step 1: only the wrong piece lights (take it off) -- NOT its destination too
     gd = compute_guidance(g, sensed)
     assert gd.alert
     assert gd.target is not None                    # shows the position to restore
-    assert chess.E5 in gd.highlight and chess.E2 in gd.highlight
+    assert gd.highlight == [chess.E5]
+    assert "Nimm" in gd.instruction
+    # step 2: wrong piece lifted (in hand) -> now the destination e2 lights
+    lifted = chess.Board()
+    pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
+    gd = compute_guidance(g, lifted, restoring=True)
+    assert gd.highlight == [chess.E2]
+    assert not gd.alert                              # calm "place it here" step
+
+
+def test_wrong_placement_restoring_false_is_your_move():
+    """Without the restoring flag a bare lift is normal play, not a destination."""
+    g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
+    lifted = chess.Board()
+    pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
+    gd = compute_guidance(g, lifted, restoring=False)
+    assert gd.status == "Du bist am Zug" and gd.highlight == []
+
+
+def test_two_wrong_pieces_light_one_at_a_time():
+    g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
+    sensed = chess.Board()
+    pm = sensed.piece_map()
+    pm[chess.E5] = pm.pop(chess.E2)
+    pm[chess.D5] = pm.pop(chess.D2)                 # two pawns misplaced
+    sensed.set_piece_map(pm)
+    gd = compute_guidance(g, sensed)
+    assert len(gd.highlight) == 1                    # only one LED, the lowest square
+    assert gd.highlight == [min(chess.D5, chess.E5)]
 
 
 def test_promotion_in_progress_guidance():

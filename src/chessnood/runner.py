@@ -56,6 +56,11 @@ class Runner:
         self._beeps = cfg.board.beeps
         self._prev_state = self._game.state
         self._prev_alert = False
+        # True while the player is cleaning up a wrong position: once a wrong
+        # piece is lifted this keeps us lighting its destination square (one LED
+        # at a time) instead of falling back to "your move". Set when guidance
+        # alerts, cleared once the board is fully correct again.
+        self._restoring = False
         self._game_file = Path(cfg.game_state_file) if cfg.game_state_file else None
         self._load_game()
 
@@ -146,7 +151,7 @@ class Runner:
             self._connection = state
             self._status.update(connection=state.value)
             if state == ConnectionState.CONNECTED:
-                self._ui = compute_guidance(self._game, self._sensed)
+                self._ui = compute_guidance(self._game, self._sensed, restoring=self._restoring)
             self._refresh_screen()
 
     async def _handle_readings(self, readings: "asyncio.Queue") -> None:
@@ -201,11 +206,21 @@ class Runner:
 
     async def _apply_guidance(self, *, beep: bool) -> None:
         """Recompute guidance for the sensed position and drive LEDs + screen."""
-        self._ui = compute_guidance(self._game, self._sensed)
+        self._ui = compute_guidance(self._game, self._sensed, restoring=self._restoring)
+        self._update_restoring()
         await self._board.set_leds(self._ui.highlight)
         if beep:
             await self._beep_on_transition()
         self._refresh_screen()
+
+    def _update_restoring(self) -> None:
+        """Track whether we're mid-cleanup, so the destination square lights after
+        a wrong piece is lifted (see ``compute_guidance``'s ``restoring``)."""
+        if self._ui.alert:
+            self._restoring = True   # a wrong piece is on the board
+        elif self._sensed.piece_map() == self._game.board.piece_map():
+            self._restoring = False  # fully back to the correct position
+        # otherwise a piece is in hand mid-cleanup -> keep restoring
 
     async def _beep_on_transition(self) -> None:
         """A short tone only when something newly needs the player's attention."""

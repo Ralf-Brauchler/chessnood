@@ -1,4 +1,6 @@
 """Runner wiring: connection-state screen, and resilience to a bad save file."""
+import asyncio
+
 import chess
 
 from chessnood.boards.base import ConnectionState
@@ -59,6 +61,40 @@ def test_corrupt_save_file_does_not_crash_and_starts_fresh(tmp_path):
     r = Runner(MockBoard(), ConfigWatcher(str(cfg)))   # must not raise
     assert r._game.state == GameState.NEED_SETUP
     assert r._game.board.fen() == chess.Board().fen()
+
+
+def _pieces(board: chess.Board) -> chess.Board:
+    b = chess.Board(); b.set_piece_map(board.piece_map()); return b
+
+
+def test_cleanup_lights_one_led_then_destination(tmp_path):
+    """End-to-end: a wrong piece lights alone; once lifted the destination lights;
+    once placed back it's 'your move' again -- driven through _apply_guidance."""
+    r = _runner(tmp_path)
+    r._game.state = GameState.PLAYER_TURN
+    board = r._game.board                                  # start position
+
+    # 1. wrong placement: e2 pawn sits on e5
+    wrong = chess.Board()
+    pm = wrong.piece_map(); pm[chess.E5] = pm.pop(chess.E2); wrong.set_piece_map(pm)
+    r._sensed = _pieces(wrong)
+    asyncio.run(r._apply_guidance(beep=False))
+    assert r._restoring is True
+    assert r._ui.highlight == [chess.E5] and r._ui.alert   # take the wrong piece off
+
+    # 2. wrong piece lifted (in hand): only the destination e2 lights
+    lifted = chess.Board()
+    pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
+    r._sensed = _pieces(lifted)
+    asyncio.run(r._apply_guidance(beep=False))
+    assert r._restoring is True                            # still cleaning up
+    assert r._ui.highlight == [chess.E2] and not r._ui.alert
+
+    # 3. placed back correctly: fully restored -> 'your move', restoring cleared
+    r._sensed = _pieces(board)
+    asyncio.run(r._apply_guidance(beep=False))
+    assert r._restoring is False
+    assert r._ui.status == "Du bist am Zug" and r._ui.highlight == []
 
 
 def test_save_game_writes_a_restorable_file(tmp_path):
