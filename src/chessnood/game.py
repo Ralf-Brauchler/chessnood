@@ -307,6 +307,13 @@ def _is_simple_move(game: chess.Board, move: chess.Move) -> bool:
                 or move.promotion or game.is_capture(move))
 
 
+def _is_plain_capture(game: chess.Board, move: chess.Move) -> bool:
+    """A normal capture (own piece takes the piece standing on the destination) --
+    not en passant or a promotion-capture. These are guided one square at a time,
+    with an extra first step to take the captured piece off the board."""
+    return game.is_capture(move) and not game.is_en_passant(move) and not move.promotion
+
+
 def _engine_move_guidance(game: chess.Board, move: chess.Move) -> tuple[list[int], str]:
     """Squares to light and a plain instruction for executing the engine's move."""
     involved = [move.from_square, move.to_square]
@@ -372,6 +379,25 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
         expected.push(move)
         done = sensed.piece_map() == expected.piece_map()
         executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
+
+        # Plain capture: guide one square at a time with an extra first step --
+        # take the opponent's piece off the destination, then lift the computer's
+        # piece, then place it. (Was: from+to lit together, which the father can't
+        # read.) En passant / castling / promotion still light all at once below.
+        if _is_plain_capture(board, move):
+            smap, bmap = sensed.piece_map(), board.piece_map()
+            if done:
+                return Guidance("Der Computer hat gezogen", "Der Zug ist ausgeführt.")
+            alert = not executing
+            if smap.get(move.to_square) == bmap.get(move.to_square):   # enemy still on target
+                return Guidance("Der Computer schlägt",
+                                "Nimm die gegnerische Figur vom leuchtenden Feld.",
+                                [move.to_square], alert=alert)
+            if smap.get(move.from_square) == bmap.get(move.from_square):  # mover still on source
+                return Guidance("Der Computer hat gezogen", "Hebe die leuchtende Figur an.",
+                                [move.from_square], alert=alert)
+            return Guidance("Der Computer hat gezogen", "Stelle die Figur auf das leuchtende Feld.",
+                            [move.to_square], alert=alert)
 
         # Special/complex moves keep lighting all involved squares at once.
         if not _is_simple_move(board, move):

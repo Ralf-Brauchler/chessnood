@@ -141,6 +141,34 @@ def test_engine_simple_move_guides_source_then_destination():
     assert "leuchtende Feld" in gd.instruction and not gd.alert
 
 
+def test_engine_capture_guides_one_square_at_a_time():
+    """A capture is now guided step by step: take the enemy off, lift the mover,
+    place it -- one LED each, never source+destination together."""
+    fen = "4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1"   # white Pe4, black pd5
+    g = _game(fen, GameState.ENGINE_MOVE_SHOWN, pending="e4d5")
+    board = chess.Board(fen)
+
+    # step 1: enemy still on d5 -> light only d5 (take the captured piece off)
+    gd = compute_guidance(g, board)
+    assert gd.highlight == [chess.D5] and not gd.alert
+    assert "gegnerische" in gd.instruction.lower()
+
+    # step 2: enemy removed -> light only the source e4 (lift the computer's piece)
+    s1 = board.copy(); pm = s1.piece_map(); del pm[chess.D5]; s1.set_piece_map(pm)
+    gd = compute_guidance(g, s1)
+    assert gd.highlight == [chess.E4] and "Hebe" in gd.instruction
+
+    # step 3: mover lifted too -> light only the destination d5 (place it)
+    s2 = s1.copy(); pm = s2.piece_map(); del pm[chess.E4]; s2.set_piece_map(pm)
+    gd = compute_guidance(g, s2)
+    assert gd.highlight == [chess.D5] and "leuchtende Feld" in gd.instruction
+
+    # done: pawn now on d5, e4 empty
+    expected = board.copy(); expected.push_uci("e4d5")
+    gd = compute_guidance(g, expected)
+    assert gd.highlight == [] and gd.status == "Der Computer hat gezogen"
+
+
 def test_engine_castling_lights_king_and_rook():
     fen = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"
     g = _game(fen, GameState.ENGINE_MOVE_SHOWN, pending="e1g1")
