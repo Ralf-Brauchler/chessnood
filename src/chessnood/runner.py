@@ -56,11 +56,10 @@ class Runner:
         self._beeps = cfg.board.beeps
         self._prev_state = self._game.state
         self._prev_alert = False
-        # True while the player is cleaning up a wrong position: once a wrong
-        # piece is lifted this keeps us lighting its destination square (one LED
-        # at a time) instead of falling back to "your move". Set when guidance
-        # alerts, cleared once the board is fully correct again.
-        self._restoring = False
+        # (src, dst) of the piece currently being cleaned up, threaded through
+        # compute_guidance so that after a wrong piece is lifted we light the one
+        # square it belongs on -- one whole piece at a time. None when not fixing.
+        self._fixing: tuple[int, int] | None = None
         self._game_file = Path(cfg.game_state_file) if cfg.game_state_file else None
         self._load_game()
 
@@ -68,7 +67,7 @@ class Runner:
         self._loop = asyncio.get_running_loop()
         self._display.on_new_game(self._request_new_game)
         self._status.update(state="starting", skill_level=self._watcher.current.engine.skill_level)
-        self._ui = compute_guidance(self._game, self._sensed)
+        self._recompute_guidance()
         self._refresh_screen()
         readings = self._board.subscribe_readings()
         states = self._board.subscribe_state()
@@ -151,7 +150,7 @@ class Runner:
             self._connection = state
             self._status.update(connection=state.value)
             if state == ConnectionState.CONNECTED:
-                self._ui = compute_guidance(self._game, self._sensed, restoring=self._restoring)
+                self._recompute_guidance()
             self._refresh_screen()
 
     async def _handle_readings(self, readings: "asyncio.Queue") -> None:
@@ -204,23 +203,19 @@ class Runner:
         if reaction.engine_should_move:
             await self._do_engine_move()
 
+    def _recompute_guidance(self) -> None:
+        """Recompute guidance for the sensed position, threading the cleanup
+        ``fixing`` state so a correction is guided one whole piece at a time."""
+        self._ui = compute_guidance(self._game, self._sensed, fixing=self._fixing)
+        self._fixing = self._ui.fixing
+
     async def _apply_guidance(self, *, beep: bool) -> None:
         """Recompute guidance for the sensed position and drive LEDs + screen."""
-        self._ui = compute_guidance(self._game, self._sensed, restoring=self._restoring)
-        self._update_restoring()
+        self._recompute_guidance()
         await self._board.set_leds(self._ui.highlight)
         if beep:
             await self._beep_on_transition()
         self._refresh_screen()
-
-    def _update_restoring(self) -> None:
-        """Track whether we're mid-cleanup, so the destination square lights after
-        a wrong piece is lifted (see ``compute_guidance``'s ``restoring``)."""
-        if self._ui.alert:
-            self._restoring = True   # a wrong piece is on the board
-        elif self._sensed.piece_map() == self._game.board.piece_map():
-            self._restoring = False  # fully back to the correct position
-        # otherwise a piece is in hand mid-cleanup -> keep restoring
 
     async def _beep_on_transition(self) -> None:
         """A short tone only when something newly needs the player's attention."""

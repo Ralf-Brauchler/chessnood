@@ -33,46 +33,70 @@ def test_lifted_piece_is_not_an_error():
     assert gd.status == "Du bist am Zug" and not gd.alert
 
 
+def _with_piece_moved(frm: int, to: int) -> chess.Board:
+    b = chess.Board()
+    pm = b.piece_map(); pm[to] = pm.pop(frm); b.set_piece_map(pm)
+    return b
+
+
 def test_wrong_placement_lights_one_square_at_a_time():
-    """A wrong position is fixed one LED at a time, not the whole diff at once."""
+    """One misplaced piece: light it to lift, then light where it belongs."""
     g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
-    sensed = chess.Board()
-    pm = sensed.piece_map()
-    pm[chess.E5] = pm.pop(chess.E2)                # pawn teleported to a non-legal spot
-    sensed.set_piece_map(pm)
-    # step 1: only the wrong piece lights (take it off) -- NOT its destination too
-    gd = compute_guidance(g, sensed)
-    assert gd.alert
-    assert gd.target is not None                    # shows the position to restore
+    sensed = _with_piece_moved(chess.E2, chess.E5)   # pawn teleported to a non-legal spot
+    # step 1: only the wrong piece lights (lift it) -- NOT its destination too
+    gd = compute_guidance(g, sensed, fixing=None)
+    assert gd.alert and gd.target is not None
     assert gd.highlight == [chess.E5]
-    assert "Nimm" in gd.instruction
+    assert gd.fixing == (chess.E5, chess.E2)         # remembers where it goes
     # step 2: wrong piece lifted (in hand) -> now the destination e2 lights
     lifted = chess.Board()
     pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
-    gd = compute_guidance(g, lifted, restoring=True)
-    assert gd.highlight == [chess.E2]
-    assert not gd.alert                              # calm "place it here" step
+    gd = compute_guidance(g, lifted, fixing=gd.fixing)
+    assert gd.highlight == [chess.E2] and not gd.alert
+    # step 3: placed back -> fully correct -> your move, no LED, fixing cleared
+    gd = compute_guidance(g, chess.Board(), fixing=gd.fixing)
+    assert gd.status == "Du bist am Zug" and gd.highlight == [] and gd.fixing is None
 
 
-def test_wrong_placement_restoring_false_is_your_move():
-    """Without the restoring flag a bare lift is normal play, not a destination."""
+def test_bare_lift_without_fixing_is_your_move():
+    """A lifted piece during normal play (nothing wrong) is not a cleanup."""
     g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
     lifted = chess.Board()
     pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
-    gd = compute_guidance(g, lifted, restoring=False)
+    gd = compute_guidance(g, lifted, fixing=None)
     assert gd.status == "Du bist am Zug" and gd.highlight == []
 
 
-def test_two_wrong_pieces_light_one_at_a_time():
+def test_two_wrong_pieces_fixed_one_whole_piece_at_a_time():
+    """The core fix: correct one piece fully (lift THEN place) before the next --
+    never 'lift everything first'."""
     g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
     sensed = chess.Board()
     pm = sensed.piece_map()
     pm[chess.E5] = pm.pop(chess.E2)
-    pm[chess.D5] = pm.pop(chess.D2)                 # two pawns misplaced
+    pm[chess.D5] = pm.pop(chess.D2)                  # two pawns misplaced (d5 < e5)
     sensed.set_piece_map(pm)
-    gd = compute_guidance(g, sensed)
-    assert len(gd.highlight) == 1                    # only one LED, the lowest square
-    assert gd.highlight == [min(chess.D5, chess.E5)]
+
+    fixing = None
+    # step 1: lift the first (lowest) wrong piece -- exactly one LED
+    gd = compute_guidance(g, sensed, fixing=fixing); fixing = gd.fixing
+    assert gd.highlight == [chess.D5] and gd.fixing == (chess.D5, chess.D2)
+    # step 2: d5 lifted, e5 STILL wrong -> we place d5's piece, not lift e5
+    pm = sensed.piece_map(); del pm[chess.D5]; s2 = chess.Board(); s2.set_piece_map(pm)
+    gd = compute_guidance(g, s2, fixing=fixing); fixing = gd.fixing
+    assert gd.highlight == [chess.D2] and not gd.alert   # place it, ignore e5 for now
+    # step 3: d-pawn placed back; now the second piece starts
+    pm = s2.piece_map(); pm[chess.D2] = chess.Piece(chess.PAWN, chess.WHITE)
+    s3 = chess.Board(); s3.set_piece_map(pm)
+    gd = compute_guidance(g, s3, fixing=fixing); fixing = gd.fixing
+    assert gd.highlight == [chess.E5] and gd.fixing == (chess.E5, chess.E2)
+    # step 4: e5 lifted -> place on e2
+    pm = s3.piece_map(); del pm[chess.E5]; s4 = chess.Board(); s4.set_piece_map(pm)
+    gd = compute_guidance(g, s4, fixing=fixing); fixing = gd.fixing
+    assert gd.highlight == [chess.E2]
+    # step 5: fully restored
+    gd = compute_guidance(g, chess.Board(), fixing=fixing)
+    assert gd.highlight == [] and gd.fixing is None
 
 
 def test_promotion_in_progress_guidance():

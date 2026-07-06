@@ -69,7 +69,8 @@ def _pieces(board: chess.Board) -> chess.Board:
 
 def test_cleanup_lights_one_led_then_destination(tmp_path):
     """End-to-end: a wrong piece lights alone; once lifted the destination lights;
-    once placed back it's 'your move' again -- driven through _apply_guidance."""
+    once placed back it's 'your move' again -- driven through _apply_guidance with
+    the runner threading the ``fixing`` state itself."""
     r = _runner(tmp_path)
     r._game.state = GameState.PLAYER_TURN
     board = r._game.board                                  # start position
@@ -79,21 +80,21 @@ def test_cleanup_lights_one_led_then_destination(tmp_path):
     pm = wrong.piece_map(); pm[chess.E5] = pm.pop(chess.E2); wrong.set_piece_map(pm)
     r._sensed = _pieces(wrong)
     asyncio.run(r._apply_guidance(beep=False))
-    assert r._restoring is True
-    assert r._ui.highlight == [chess.E5] and r._ui.alert   # take the wrong piece off
+    assert r._fixing == (chess.E5, chess.E2)
+    assert r._ui.highlight == [chess.E5] and r._ui.alert   # lift the wrong piece
 
     # 2. wrong piece lifted (in hand): only the destination e2 lights
     lifted = chess.Board()
     pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
     r._sensed = _pieces(lifted)
     asyncio.run(r._apply_guidance(beep=False))
-    assert r._restoring is True                            # still cleaning up
+    assert r._fixing == (chess.E5, chess.E2)              # still correcting this piece
     assert r._ui.highlight == [chess.E2] and not r._ui.alert
 
-    # 3. placed back correctly: fully restored -> 'your move', restoring cleared
+    # 3. placed back correctly: fully restored -> 'your move', fixing cleared
     r._sensed = _pieces(board)
     asyncio.run(r._apply_guidance(beep=False))
-    assert r._restoring is False
+    assert r._fixing is None
     assert r._ui.status == "Du bist am Zug" and r._ui.highlight == []
 
 

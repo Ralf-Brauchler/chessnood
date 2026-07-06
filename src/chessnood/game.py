@@ -201,6 +201,9 @@ class Guidance:
     highlight: list[int] = field(default_factory=list)  # squares to light
     target: chess.Board | None = None            # position to show (else: sensed)
     alert: bool = False                          # something is wrong / needs fixing
+    # (src, dst) of the piece currently being cleaned up, threaded back by the
+    # runner so the destination lights after the piece is lifted (see _plan_recovery)
+    fixing: "tuple[int, int] | None" = None
 
 
 def _diff_squares(a: chess.Board, b: chess.Board) -> list[int]:
@@ -222,25 +225,51 @@ def _missing_squares(sensed: chess.Board, target: chess.Board) -> list[int]:
     return sorted(sq for sq, piece in target.piece_map().items() if sm.get(sq) != piece)
 
 
-def _recovery_step(sensed: chess.Board, target: chess.Board) -> tuple[list[int], str]:
-    """One square at a time back toward ``target`` -- never a whole diff at once.
+Fixing = tuple[int, int]  # (source, destination) of the piece being corrected
 
-    Lighting many LEDs when the board is in a wrong state is hard to read; instead
-    guide the fix one step at a time. First take off every wrong/extra piece
-    (lowest square first, one by one), then -- once nothing wrong is left -- fill
-    the squares still missing a piece. The runner pairs this with a `restoring`
-    flag so that after a wrong piece is lifted the *destination* lights up next.
+
+def _plan_recovery(sensed: chess.Board, target: chess.Board,
+                   fixing: "Fixing | None"
+                   ) -> tuple[list[int], str, bool, "Fixing | None"]:
+    """Guide a wrong position back to ``target`` **one whole piece at a time**:
+    light the misplaced piece to lift, then -- once lifted -- light the single
+    square it belongs on, and only then move on to the next wrong piece.
+
+    Returns ``(highlight, instruction, alert, fixing)``. ``fixing`` is the
+    ``(src, dst)`` of the piece currently being corrected; the runner threads it
+    back in on the next reading so that after the piece is lifted we light its
+    destination -- and ignore any other wrong pieces until it is placed. This is
+    what stops "lift everything first, then guess where each goes".
+
+    Only a genuinely wrong piece (or an in-progress correction) engages this. A
+    bare lifted piece during normal play has nothing *wrong* on the board, so we
+    return an empty highlight and ``fixing=None`` and let the caller treat it as
+    ordinary play.
     """
-    wrong = _wrong_squares(sensed, target)
+    smap, tmap = sensed.piece_map(), target.piece_map()
+    wrong = sorted(sq for sq, piece in smap.items() if tmap.get(sq) != piece)
+    missing = sorted(sq for sq, piece in tmap.items() if smap.get(sq) != piece)
+
+    # Continue the piece already being corrected before touching any other.
+    if fixing is not None:
+        src, dst = fixing
+        if src in wrong:                       # not lifted yet -> keep lighting it
+            return [src], "Hebe die leuchtende Figur an.", True, fixing
+        if dst in missing:                     # lifted -> light where it belongs
+            return [dst], "Stelle die Figur auf das leuchtende Feld.", False, fixing
+        # placed (or the position changed) -> this piece is done; fall through
+
     if wrong:
-        sq = wrong[0]
-        if sq in target.piece_map():
-            return [sq], "Nimm die falsch stehende Figur vom leuchtenden Feld."
-        return [sq], "Nimm die Figur vom leuchtenden Feld herunter."
-    missing = _missing_squares(sensed, target)
-    if missing:
-        return [missing[0]], "Stelle die fehlende Figur auf das leuchtende Feld."
-    return [], ""
+        src = wrong[0]
+        piece = smap[src]
+        homes = [m for m in missing if tmap[m] == piece]
+        if homes:                              # a misplaced piece: lift it, then place it
+            return [src], "Hebe die leuchtende Figur an.", True, (src, homes[0])
+        # an extra piece with no home (e.g. a stray/duplicate) -> just take it off
+        return [src], "Nimm die Figur vom Brett.", True, None
+
+    # No wrong piece present and no correction in progress -> not a cleanup.
+    return [], "", False, None
 
 
 def _is_lift_of(sensed: chess.Board, reference: chess.Board) -> bool:
@@ -297,46 +326,45 @@ def _engine_move_guidance(game: chess.Board, move: chess.Move) -> tuple[list[int
 
 
 def compute_guidance(game: "ChessGame", sensed: chess.Board,
-                     restoring: bool = False) -> Guidance:
+                     fixing: "tuple[int, int] | None" = None) -> Guidance:
     """What to show/say given the game state and the sensed physical position.
 
-    ``restoring`` (tracked by the runner) is True while the player is cleaning up
-    a wrong position -- after a wrong piece has been lifted it makes us light the
-    single square it belongs on, instead of falling back to "your move".
+    ``fixing`` (tracked by the runner) is the ``(src, dst)`` of the piece being
+    cleaned up, so that once it has been lifted we light the square it belongs on
+    -- one whole piece at a time -- instead of falling back to "your move" or
+    jumping to a different wrong piece. See :func:`_plan_recovery`.
     """
     state, board = game.state, game.board
 
     if state == GameState.NEED_SETUP:
         start = chess.Board()
-        # only missing pieces (still placing them) is not an error; a wrong piece is
-        if _is_lift_of(sensed, start):
-            return Guidance("Figuren aufstellen",
-                            "Stelle die Figuren in die Grundstellung.",
-                            _missing_squares(sensed, start))
-        highlight, instr = _recovery_step(sensed, start)
-        return Guidance("Figuren aufstellen", instr, highlight, target=start, alert=True)
+        hl, instr, alert, new_fixing = _plan_recovery(sensed, start, fixing)
+        if hl:                              # a wrong piece is being corrected
+            return Guidance("Figuren aufstellen", instr, hl,
+                            target=start, alert=alert, fixing=new_fixing)
+        # only missing pieces (still placing them) -> outline what's left to place
+        return Guidance("Figuren aufstellen", "Stelle die Figuren in die Grundstellung.",
+                        _missing_squares(sensed, start))
 
     if state == GameState.ENGINE_THINKING:
         return Guidance("Computer denkt …", "Bitte einen Moment warten.")
 
     if state == GameState.PLAYER_TURN:
-        if _is_lift_of(sensed, board):   # equal, or a piece lifted mid-move
-            # Mid-cleanup: a wrong piece was just taken off and is in hand. Light
-            # the one empty square it belongs on rather than saying "your move".
-            missing = _missing_squares(sensed, board)
-            if restoring and missing:
-                return Guidance("Fast geschafft",
-                                "Stelle die Figur auf das leuchtende Feld.",
-                                [missing[0]], target=board)
+        # A bare lifted piece with nothing wrong and no correction in progress is
+        # just a move being made -> "your move".
+        if fixing is None and _is_lift_of(sensed, board):
             return Guidance("Du bist am Zug", "Mach deinen Zug auf dem Brett.")
         promo = _promotion_square_in_progress(board, sensed)
         if promo is not None:
             return Guidance("Umwandlung",
                             "Ersetze den Bauern auf dem leuchtenden Feld durch eine Dame.",
                             [promo])
-        # Wrong pieces on the board: guide the fix one square at a time.
-        highlight, instr = _recovery_step(sensed, board)
-        return Guidance("Das passt nicht", instr, highlight, target=board, alert=True)
+        # Wrong pieces on the board: guide the fix one whole piece at a time.
+        hl, instr, alert, new_fixing = _plan_recovery(sensed, board, fixing)
+        if hl:
+            status = "Das passt nicht" if alert else "Fast geschafft"
+            return Guidance(status, instr, hl, target=board, alert=alert, fixing=new_fixing)
+        return Guidance("Du bist am Zug", "Mach deinen Zug auf dem Brett.")
 
     if state == GameState.ENGINE_MOVE_SHOWN and game.pending_engine_move is not None:
         move = game.pending_engine_move
