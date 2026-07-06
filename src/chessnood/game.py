@@ -114,10 +114,17 @@ class ChessGame:
         Only meaningful once play has progressed (or the game is over) -- at the
         very first move the board legitimately *is* the start position, which is
         normal play, not a restart. Ignored while the engine is thinking.
+
+        The "have we progressed?" test compares the tracked *position* to the
+        start, NOT ``move_stack``: a game resumed from disk (``restore``) rebuilds
+        the board from FEN with an empty move stack even though it is mid-game, so
+        keying off ``move_stack`` would wrongly refuse to restart a resumed game
+        (the player sets up the start position and nothing happens).
         """
         if self.state == GameState.ENGINE_THINKING:
             return False
-        if self.state != GameState.GAME_OVER and not self.board.move_stack:
+        at_start = self.board.piece_map() == chess.Board().piece_map()
+        if self.state != GameState.GAME_OVER and at_start:
             return False
         return reading.matches(chess.Board())
 

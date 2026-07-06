@@ -106,6 +106,32 @@ def test_no_false_restart_at_first_move():
     assert not react.engine_should_move
 
 
+def test_auto_new_game_after_resume_from_disk():
+    """After a reboot, a game restored from disk (empty move_stack, mid-position)
+    must still accept the start position as a new-game request -- regression for
+    the `not move_stack` guard that left a resumed game with no way out."""
+    saved = ChessGame(human_color=chess.WHITE)
+    saved.feed(reading_of(chess.Board()))              # NEED_SETUP -> PLAYER_TURN
+    b = chess.Board()
+    b.push_uci("e2e4")
+    saved.feed(reading_of(b))                          # -> ENGINE_THINKING
+    saved.set_engine_move(chess.Move.from_uci("c7c5")) # -> ENGINE_MOVE_SHOWN
+    snap = saved.snapshot()
+
+    # Simulate the reboot: a fresh game object restored from the snapshot. This
+    # rebuilds the board from FEN, so move_stack is empty though we're mid-game.
+    resumed = ChessGame()
+    resumed.restore(snap)
+    assert not resumed.board.move_stack
+    assert resumed.state == GameState.ENGINE_MOVE_SHOWN
+
+    react = resumed.feed(reading_of(chess.Board()))     # set up the start position
+    assert resumed.state == GameState.PLAYER_TURN
+    assert resumed.board.fen() == chess.STARTING_FEN
+    assert resumed.pending_engine_move is None
+    assert not react.engine_should_move
+
+
 def test_auto_new_game_from_game_over():
     game = ChessGame(human_color=chess.WHITE)
     for uci in ("f2f3", "e7e5", "g2g4", "d8h4"):       # fool's mate

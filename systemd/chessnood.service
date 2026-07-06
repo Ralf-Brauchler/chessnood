@@ -14,7 +14,7 @@ Type=notify
 WatchdogSec=30
 User=__USER__
 WorkingDirectory=__DIR__
-ExecStart=__DIR__/.venv/bin/chessnood run -c __DIR__/config.yaml
+ExecStart=__DIR__/.venv/bin/chessnood -c __DIR__/config.yaml run
 Restart=always
 RestartSec=3
 # Logs go to the journal: view with `journalctl -fu chessnood`
