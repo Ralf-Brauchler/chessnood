@@ -255,9 +255,13 @@ def _plan_recovery(sensed: chess.Board, target: chess.Board,
         src, dst = fixing
         if src in wrong:                       # not lifted yet -> keep lighting it
             return [src], "Hebe die leuchtende Figur an.", True, fixing
-        if dst in missing:                     # lifted -> light where it belongs
+        # Light the destination only if the piece is genuinely in hand. More empty
+        # target squares than wrong pieces means a piece is off the board; if the
+        # counts are equal the piece was set down on a WRONG square instead, so we
+        # fall through and pick that square up first (below).
+        if dst in missing and len(missing) > len(wrong):
             return [dst], "Stelle die Figur auf das leuchtende Feld.", False, fixing
-        # placed (or the position changed) -> this piece is done; fall through
+        # placed, in hand elsewhere, or done -> fall through
 
     if wrong:
         src = wrong[0]
@@ -377,48 +381,38 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
         move = game.pending_engine_move
         expected = board.copy(stack=False)
         expected.push(move)
-        done = sensed.piece_map() == expected.piece_map()
-        executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
+        if sensed.piece_map() == expected.piece_map():
+            return Guidance("Der Computer hat gezogen", "Der Zug ist ausgeführt.")
 
-        # Plain capture: guide one square at a time with an extra first step --
-        # take the opponent's piece off the destination, then lift the computer's
-        # piece, then place it. (Was: from+to lit together, which the father can't
-        # read.) En passant / castling / promotion still light all at once below.
-        if _is_plain_capture(board, move):
-            smap, bmap = sensed.piece_map(), board.piece_map()
-            if done:
-                return Guidance("Der Computer hat gezogen", "Der Zug ist ausgeführt.")
-            alert = not executing
-            if smap.get(move.to_square) == bmap.get(move.to_square):   # enemy still on target
-                return Guidance("Der Computer schlägt",
-                                "Nimm die gegnerische Figur vom leuchtenden Feld.",
-                                [move.to_square], alert=alert)
-            if smap.get(move.from_square) == bmap.get(move.from_square):  # mover still on source
-                return Guidance("Der Computer hat gezogen", "Hebe die leuchtende Figur an.",
-                                [move.from_square], alert=alert)
-            return Guidance("Der Computer hat gezogen", "Stelle die Figur auf das leuchtende Feld.",
-                            [move.to_square], alert=alert)
-
-        # Special/complex moves keep lighting all involved squares at once.
-        if not _is_simple_move(board, move):
+        # En passant / castling / promotion: light all involved squares at once
+        # (rare and interlocking; sequencing them is a later phase).
+        if not _is_simple_move(board, move) and not _is_plain_capture(board, move):
             involved, instr = _engine_move_guidance(board, move)
-            if done or executing:
+            executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
+            if executing:
                 return Guidance("Der Computer hat gezogen", instr, involved)
             return Guidance("Fast — bitte den leuchtenden Zug ausführen", instr, involved, alert=True)
 
-        # Simple move: guide one square at a time -- light the source, and once it
-        # has been lifted, light the destination. Less to interpret than two lit
-        # squares at once (which is "from", which is "to").
-        if done:
-            return Guidance("Der Computer hat gezogen", "Führe den leuchtenden Zug aus.")
-        if not executing:                              # a piece sits on a wrong square
-            return Guidance("Fast — bitte den leuchtenden Zug ausführen",
-                            "Stelle die Figur auf das leuchtende Feld.", [move.to_square], alert=True)
-        if move.from_square in sensed.piece_map():     # source still on the board
-            return Guidance("Der Computer hat gezogen", "Hebe die leuchtende Figur an.",
-                            [move.from_square])
-        return Guidance("Der Computer hat gezogen", "Stelle die Figur auf das leuchtende Feld.",
-                        [move.to_square])
+        # Plain capture: first take the opponent's piece off the destination.
+        if _is_plain_capture(board, move) and \
+                sensed.piece_map().get(move.to_square) == board.piece_map().get(move.to_square):
+            return Guidance("Der Computer schlägt",
+                            "Nimm die gegnerische Figur vom leuchtenden Feld.", [move.to_square])
+
+        # Simple move (or a capture once the enemy is off): guide the computer's
+        # piece to its destination one square at a time -- and, crucially, if it's
+        # set down on the WRONG square, light that square until it's lifted, then
+        # the correct destination. Seed the (from,to) pairing so this works even if
+        # the threaded fixing state was lost (e.g. across a restart mid-move).
+        seed = fixing if fixing is not None else (move.from_square, move.to_square)
+        hl, instr, _plan_alert, new_fixing = _plan_recovery(sensed, expected, seed)
+        if not hl:
+            return Guidance("Der Computer hat gezogen", "Der Zug ist ausgeführt.")
+        executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
+        if executing:                                  # on track -> calm guidance
+            return Guidance("Der Computer hat gezogen", instr, hl, fixing=new_fixing)
+        return Guidance("Fast — bitte den leuchtenden Zug ausführen", instr, hl,
+                        target=expected, alert=True, fixing=new_fixing)
 
     if state == GameState.GAME_OVER:
         return Guidance(_result_text_for(board),

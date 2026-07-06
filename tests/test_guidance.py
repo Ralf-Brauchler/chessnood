@@ -141,6 +141,27 @@ def test_engine_simple_move_guides_source_then_destination():
     assert "leuchtende Feld" in gd.instruction and not gd.alert
 
 
+def test_engine_move_wrong_square_goes_into_correction():
+    """Executing the computer's move, if the piece is set on the WRONG square, that
+    square lights (alert) until it's lifted, then the correct destination lights."""
+    g = _game(chess.STARTING_FEN, GameState.ENGINE_MOVE_SHOWN, pending="e2e4")
+
+    # correct piece placed on the wrong square e3 (destination is e4)
+    wrong = chess.Board()
+    pm = wrong.piece_map(); pm[chess.E3] = pm.pop(chess.E2); wrong.set_piece_map(pm)
+    gd = compute_guidance(g, wrong, fixing=None)
+    assert gd.alert and gd.highlight == [chess.E3]        # light the wrong square
+    assert "Hebe" in gd.instruction
+    assert gd.fixing == (chess.E3, chess.E4)
+
+    # lifted off the wrong square -> now the real destination e4 lights, calm
+    lifted = chess.Board()
+    pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
+    gd = compute_guidance(g, lifted, fixing=gd.fixing)
+    assert not gd.alert and gd.highlight == [chess.E4]
+    assert "leuchtende Feld" in gd.instruction
+
+
 def test_engine_capture_guides_one_square_at_a_time():
     """A capture is now guided step by step: take the enemy off, lift the mover,
     place it -- one LED each, never source+destination together."""
