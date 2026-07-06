@@ -49,7 +49,6 @@ class BoardConfig:
     settle_ms: int = 1000  # a move is committed only after the board is stable this long
     beeps: bool = True     # short tones on the board for "your turn" / wrong move / game over
     stale_timeout_s: float = 0.0  # >0: reconnect if no board report for this long (0 = off)  # VERIFY
-    led_animation: bool = False  # animate a converging cross onto a single lit target square
 
 
 @dataclass

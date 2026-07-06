@@ -92,49 +92,18 @@ def encode_leds(squares: Iterable[int]) -> bytes:
 
 _LED_OFF = CMD_LED + bytes(8)  # all ranks 0 -> every LED off
 
-# --- optional "converging cross" animation onto a single target square -----
-# Four arms on the target's rank and file start ``ANIM_REACH`` squares out and
-# march inward over successive frames; the target stays lit the whole time and
-# the final frame is the target alone (identical to the un-animated result). The
-# frame interval is >= the write throttle so playing frames never makes the read
-# loop sleep (see the read loop). Paced by the read loop, gated by ``animate``.
-ANIM_REACH = 3        # arms start this many squares from the target
-ANIM_FRAME_S = 0.22   # seconds per animation frame (>= WRITE_INTERVAL_S)
-
-
-def cross_frames(square: int, reach: int = ANIM_REACH) -> list[bytes]:
-    """LED payloads for a cross collapsing onto ``square``: arms at distance
-    reach, reach-1, ... 1, then the target alone. Target lit in every frame."""
-    f, r = chess.square_file(square), chess.square_rank(square)
-    frames: list[bytes] = []
-    for k in range(reach, 0, -1):
-        lit = [square]
-        for df, dr in ((k, 0), (-k, 0), (0, k), (0, -k)):
-            nf, nr = f + df, r + dr
-            if 0 <= nf < 8 and 0 <= nr < 8:
-                lit.append(chess.square(nf, nr))
-        frames.append(encode_leds(lit))
-    frames.append(encode_leds([square]))   # settle on exactly the target
-    return frames
-
 
 class UsbBoard(Board):
-    def __init__(self, stale_timeout_s: float = 0.0, animate: bool = False) -> None:
+    def __init__(self, stale_timeout_s: float = 0.0) -> None:
         super().__init__()
         self._dev = None              # hid.device
-        self._lock = threading.Lock()        # guards the device handle + anim state (held briefly)
+        self._lock = threading.Lock()        # guards the device handle (held briefly)
         self._write_lock = threading.Lock()  # serialises writers + the >=200ms throttle
         self._run = False
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_write = 0.0
         self._last_led_payload: bytes | None = None
-        # Converging-cross animation (config board.led_animation). When a new
-        # single-square target is set we queue frames the read loop plays before
-        # settling on the steady payload; the target stays lit throughout.
-        self._animate = animate
-        self._anim_frames: list[bytes] = []
-        self._anim_next = 0.0
         # If > 0, force a reconnect after this many seconds without a board report
         # (catches a board whose firmware/USB wedged but stays enumerated, so the
         # app would otherwise sit on a dead "connected" link forever). Off by
@@ -161,25 +130,13 @@ class UsbBoard(Board):
         self._post_state(ConnectionState.DISCONNECTED)
 
     async def set_leds(self, squares: Iterable[int]) -> None:
-        sqs = list(squares)
-        payload = encode_leds(sqs)
+        payload = encode_leds(squares)
         # Skip redundant writes: during a guided move set_leds fires on every
         # reading, mostly with the same squares. Re-sending wastes the 200ms
-        # write budget and starves reads for no change on the board. (Also stops
-        # the animation re-triggering on every refresh-driven same-target call.)
+        # write budget and starves reads for no change on the board.
         if payload == self._last_led_payload:
             return
         self._last_led_payload = payload
-        # A new single-square target: queue the converging-cross animation for the
-        # read loop to play (target stays lit; last frame == the steady payload).
-        # Everything else (multi-square, all-off, animation disabled) writes now.
-        if self._animate and len(sqs) == 1:
-            with self._lock:
-                self._anim_frames = cross_frames(sqs[0])
-                self._anim_next = 0.0
-            return
-        with self._lock:
-            self._anim_frames = []
         await asyncio.to_thread(self._write, payload)
 
     async def beep(self, frequency_hz: int = 1000, duration_ms: int = 150) -> None:
@@ -219,10 +176,8 @@ class UsbBoard(Board):
         with self._lock:
             self._dev = dev
         # A fresh link: the board's LEDs are off and the dedup cache is stale, so
-        # let the next set_leds through unconditionally. Drop any stale animation.
+        # let the next set_leds through unconditionally.
         self._last_led_payload = None
-        with self._lock:
-            self._anim_frames = []
         self._write(CMD_REALTIME)
         self._post_state(ConnectionState.CONNECTED)
         log.info("Connected to board over USB")
@@ -231,24 +186,14 @@ class UsbBoard(Board):
         last_led_refresh = 0.0
         last_pieces: dict[int, chess.Piece] | None = None
         while self._run:
-            # Play a queued animation frame if one is due; otherwise re-send the
-            # current LED pattern periodically (the board auto-clears its LEDs, so
-            # a lit square would fade during a long think). Frames are paced at
-            # >= the write throttle so _write never sleeps here and starves reads.
-            now = time.monotonic()
-            frame = None
-            with self._lock:
-                if self._anim_frames and now >= self._anim_next:
-                    frame = self._anim_frames.pop(0)
-                    self._anim_next = now + ANIM_FRAME_S
-            if frame is not None:
-                self._write(frame)
-                last_led_refresh = now
-            else:
-                led = self._last_led_payload
-                if led and led != _LED_OFF and now - last_led_refresh >= LED_REFRESH_S:
-                    self._write(led)
-                    last_led_refresh = time.monotonic()
+            # Re-send the current LED pattern periodically: the board auto-clears
+            # its LEDs, so a lit square would otherwise fade during a long think.
+            # Skipped when nothing is lit (payload None/unknown or all-off).
+            led = self._last_led_payload
+            if led and led != _LED_OFF and \
+                    time.monotonic() - last_led_refresh >= LED_REFRESH_S:
+                self._write(led)
+                last_led_refresh = time.monotonic()
             with self._lock:
                 if self._dev is None:
                     return
