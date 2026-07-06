@@ -1,7 +1,6 @@
 """Command-line interface.
 
   chessnood run        run the service against the real board (or mock)
-  chessnood demo       dry-run the whole stack on the real screen (self-playing)
   chessnood simulate   play a full game with no hardware (proves the logic)
   chessnood scan       list attached Chessnut USB boards (first hardware test)
   chessnood status     print what a running service is doing
@@ -42,29 +41,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     setup_logging(watcher.current.log_level)
     board = build_board(watcher.current.board)
     runner = Runner(board, watcher)
-    try:
-        asyncio.run(runner.run())
-    except KeyboardInterrupt:
-        print("\nStopping.")
-    return 0
-
-
-def cmd_demo(args: argparse.Namespace) -> int:
-    """Dry-run the whole stack: the real Runner + display, driven by a
-    self-playing board. Shows the genuine flow on screen, no hardware needed."""
-    from .boards.mock import SelfPlayBoard
-
-    watcher = ConfigWatcher(args.config)
-    setup_logging(watcher.current.log_level)
-    # Scale the whole sequence off the one --pause knob so it can be slowed down
-    # for watching: the gap between moves, the in-hand dwell (also how long the
-    # one-square-at-a-time source/destination steps linger), and how long a
-    # fumble is held (must exceed settle_ms so the recovery UI actually shows).
-    board = SelfPlayBoard(human_color=watcher.current.game.human_color_bool,
-                          move_pause=args.pause, transient_pause=args.pause * 0.5,
-                          mistake_chance=args.mistakes, mistake_pause=args.pause * 1.2)
-    runner = Runner(board, watcher)
-    print(f"Demo: self-playing through the real UI (pause {args.pause}s). Ctrl-C to stop.")
     try:
         asyncio.run(runner.run())
     except KeyboardInterrupt:
@@ -317,13 +293,6 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("run", help="run the service").set_defaults(func=cmd_run)
-
-    p_demo = sub.add_parser("demo", help="self-playing dry-run on the real screen")
-    p_demo.add_argument("--pause", type=float, default=1.2, help="seconds between moves")
-    p_demo.add_argument("--mistakes", type=float, default=0.3, metavar="P",
-                        help="probability [0..1] a move is fumbled first to show "
-                             "the recovery UI (0 = always play correctly)")
-    p_demo.set_defaults(func=cmd_demo)
 
     p_sim = sub.add_parser("simulate", help="play a full game without hardware")
     p_sim.add_argument("--max-plies", type=int, default=200)

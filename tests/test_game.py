@@ -153,36 +153,6 @@ def test_new_game_resets():
     assert game.board.fen() == chess.STARTING_FEN
 
 
-def test_selfplay_board_drives_a_game_via_runner(tmp_path):
-    """The SelfPlayBoard + real Runner should advance a game without hardware."""
-    import asyncio
-    import chess as _chess
-    from chessnood.boards.mock import SelfPlayBoard
-    from chessnood.config import ConfigWatcher
-    from chessnood.runner import Runner
-
-    cfg = tmp_path / "c.yaml"
-    cfg.write_text(f"board:\n  backend: mock\n  settle_ms: 0\ndisplay:\n  backend: none\n"
-                   f"game_state_file: {tmp_path / 'game.json'}\n")
-
-    async def _drive():
-        board = SelfPlayBoard(human_color=_chess.WHITE, move_pause=0.0, transient_pause=0.0)
-        watcher = ConfigWatcher(str(cfg))
-        runner = Runner(board, watcher)
-        task = asyncio.create_task(runner.run())
-        # let the self-play loop make a handful of plies
-        for _ in range(50):
-            await asyncio.sleep(0)
-            if len(board._board.move_stack) >= 4:
-                break
-            await asyncio.sleep(0.02)
-        task.cancel()
-        return len(board._board.move_stack)
-
-    plies = asyncio.run(_drive())
-    assert plies >= 4
-
-
 def test_lifted_piece_is_a_transient_then_move_detected():
     """A 'piece lifted' reading is INVALID (ignored); the completed move is detected."""
     game = ChessGame(human_color=chess.WHITE)
@@ -202,84 +172,6 @@ def test_lifted_piece_is_a_transient_then_move_detected():
     react = game.feed(reading_of(after))
     assert react.engine_should_move
     assert game.state == GameState.ENGINE_THINKING
-
-
-def test_selfplay_capture_emits_transient_then_final(tmp_path):
-    """SelfPlayBoard plays a capture as lift(s) -> final, both whole positions."""
-    import asyncio
-    import chess as _chess
-    from chessnood.boards.base import BoardReading as _BR
-    from chessnood.boards.mock import SelfPlayBoard
-
-    async def _run():
-        board = SelfPlayBoard(move_pause=0.0, transient_pause=0.0)
-        readings = board.subscribe_readings()
-        b = _chess.Board()
-        for uci in ("e2e4", "d7d5"):  # set up a capture: exd5
-            b.push_uci(uci)
-        board._board = b.copy()
-        cap = _chess.Move.from_uci("e4d5")
-        await board._play_as_sequence(cap)
-        out = []
-        while not readings.empty():
-            out.append(readings.get_nowait())
-        return out
-
-    out = asyncio.run(_run())
-    assert len(out) == 2  # transient then final
-    assert isinstance(out[0], _BR)
-    # transient: the capturing pawn has been lifted off e4 (and d5 not yet ours)
-    assert chess.E4 not in out[0].pieces
-    # final: our pawn now stands on d5
-    assert out[-1].pieces[chess.D5] == chess.Piece.from_symbol("P")
-
-
-def test_selfplay_fumble_emits_a_wrong_position_then_corrects(tmp_path):
-    """With mistakes enabled, a move is played as lift -> wrong placement -> final,
-    and the wrong placement reads as INVALID (which triggers the recovery UI)."""
-    import asyncio
-    import chess as _chess
-    from chessnood.boards.mock import SelfPlayBoard
-    from chessnood.game import Detection as _Det, detect_move as _detect
-
-    async def _run():
-        # mistake_chance=1.0 -> always fumble; tiny pauses keep the test fast
-        board = SelfPlayBoard(move_pause=0.0, transient_pause=0.0,
-                              mistake_chance=1.0, mistake_pause=0.0)
-        readings = board.subscribe_readings()
-        pre = board._board.copy()
-        await board._play_as_sequence(_chess.Move.from_uci("e2e4"))
-        out = []
-        while not readings.empty():
-            out.append(readings.get_nowait())
-        return pre, out
-
-    pre, out = asyncio.run(_run())
-    assert len(out) == 3  # lift -> fumble -> final
-    # the fumble reads as INVALID on the pre-move board (no legal move matches it)
-    assert _detect(pre, out[1])[0] == _Det.INVALID
-    # ...and the final reading is the real, completed move
-    expected = pre.copy()
-    expected.push_uci("e2e4")
-    assert out[-1].pieces == expected.piece_map()
-
-
-def test_selfplay_fumble_disabled_by_default(tmp_path):
-    """Default (mistake_chance=0) plays cleanly: lift -> final, no wrong placement."""
-    import asyncio
-    import chess as _chess
-    from chessnood.boards.mock import SelfPlayBoard
-
-    async def _run():
-        board = SelfPlayBoard(move_pause=0.0, transient_pause=0.0)
-        readings = board.subscribe_readings()
-        await board._play_as_sequence(_chess.Move.from_uci("e2e4"))
-        out = []
-        while not readings.empty():
-            out.append(readings.get_nowait())
-        return out
-
-    assert len(asyncio.run(_run())) == 2  # transient then final, no fumble
 
 
 def test_slide_over_intermediate_is_not_committed(tmp_path):
