@@ -303,19 +303,13 @@ def _promotion_square_in_progress(game: chess.Board, sensed: chess.Board) -> int
     return None
 
 
-def _is_simple_move(game: chess.Board, move: chess.Move) -> bool:
-    """A plain move of one piece to an empty square -- no capture, castling, en
-    passant or promotion. Only these are guided one square at a time; the rest
-    light all involved squares at once (sequencing them is a later phase)."""
-    return not (game.is_castling(move) or game.is_en_passant(move)
-                or move.promotion or game.is_capture(move))
-
-
-def _is_plain_capture(game: chess.Board, move: chess.Move) -> bool:
-    """A normal capture (own piece takes the piece standing on the destination) --
-    not en passant or a promotion-capture. These are guided one square at a time,
-    with an extra first step to take the captured piece off the board."""
-    return game.is_capture(move) and not game.is_en_passant(move) and not move.promotion
+def _needs_all_leds(game: chess.Board, move: chess.Move) -> bool:
+    """Castling / en passant / promotion move two pieces or a piece that isn't on
+    the from/to line, so they light all involved squares at once (sequencing them
+    is a later phase). Everything else -- including a normal capture -- is guided
+    one square at a time: lift the mover, then the destination (a piece standing
+    on the destination is simply taken off, which is self-evident)."""
+    return game.is_castling(move) or game.is_en_passant(move) or bool(move.promotion)
 
 
 def _engine_move_guidance(game: chess.Board, move: chess.Move) -> tuple[list[int], str]:
@@ -386,24 +380,18 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
 
         # En passant / castling / promotion: light all involved squares at once
         # (rare and interlocking; sequencing them is a later phase).
-        if not _is_simple_move(board, move) and not _is_plain_capture(board, move):
+        if _needs_all_leds(board, move):
             involved, instr = _engine_move_guidance(board, move)
             executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
             if executing:
                 return Guidance("Der Computer hat gezogen", instr, involved)
             return Guidance("Fast — bitte den leuchtenden Zug ausführen", instr, involved, alert=True)
 
-        # Plain capture: first take the opponent's piece off the destination.
-        if _is_plain_capture(board, move) and \
-                sensed.piece_map().get(move.to_square) == board.piece_map().get(move.to_square):
-            return Guidance("Der Computer schlägt",
-                            "Nimm die gegnerische Figur vom leuchtenden Feld.", [move.to_square])
-
-        # Simple move (or a capture once the enemy is off): guide the computer's
-        # piece to its destination one square at a time -- and, crucially, if it's
-        # set down on the WRONG square, light that square until it's lifted, then
-        # the correct destination. Seed the (from,to) pairing so this works even if
-        # the threaded fixing state was lost (e.g. across a restart mid-move).
+        # Simple move or normal capture: guide the computer's piece one square at a
+        # time -- lift the mover (source lit), then the destination (a piece sitting
+        # there is simply taken off). If it's set down on the WRONG square, that
+        # square lights until it's lifted, then the correct destination. Seed the
+        # (from,to) pairing so this survives a lost fixing state (e.g. a restart).
         seed = fixing if fixing is not None else (move.from_square, move.to_square)
         hl, instr, _plan_alert, new_fixing = _plan_recovery(sensed, expected, seed)
         if not hl:

@@ -162,31 +162,31 @@ def test_engine_move_wrong_square_goes_into_correction():
     assert "leuchtende Feld" in gd.instruction
 
 
-def test_engine_capture_guides_one_square_at_a_time():
-    """A capture is now guided step by step: take the enemy off, lift the mover,
-    place it -- one LED each, never source+destination together."""
+def test_engine_capture_guides_source_then_destination():
+    """A capture is guided like a simple move: lift the mover (source), then the
+    destination lights -- the piece standing there is simply taken off. One LED
+    each, never source+destination together."""
     fen = "4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1"   # white Pe4, black pd5
     g = _game(fen, GameState.ENGINE_MOVE_SHOWN, pending="e4d5")
     board = chess.Board(fen)
 
-    # step 1: enemy still on d5 -> light only d5 (take the captured piece off)
-    gd = compute_guidance(g, board)
+    # step 1: light the source e4 -- lift the computer's (capturing) piece
+    gd = compute_guidance(g, board, fixing=None)
+    assert gd.highlight == [chess.E4] and "Hebe" in gd.instruction and not gd.alert
+
+    # step 2: mover lifted, enemy still on d5 -> the destination d5 lights
+    s1 = board.copy(); pm = s1.piece_map(); del pm[chess.E4]; s1.set_piece_map(pm)
+    gd = compute_guidance(g, s1, fixing=gd.fixing)
     assert gd.highlight == [chess.D5] and not gd.alert
-    assert "gegnerische" in gd.instruction.lower()
 
-    # step 2: enemy removed -> light only the source e4 (lift the computer's piece)
-    s1 = board.copy(); pm = s1.piece_map(); del pm[chess.D5]; s1.set_piece_map(pm)
-    gd = compute_guidance(g, s1)
-    assert gd.highlight == [chess.E4] and "Hebe" in gd.instruction
-
-    # step 3: mover lifted too -> light only the destination d5 (place it)
-    s2 = s1.copy(); pm = s2.piece_map(); del pm[chess.E4]; s2.set_piece_map(pm)
-    gd = compute_guidance(g, s2)
+    # step 3: enemy taken off d5 -> d5 still lit, now to place the piece
+    s2 = s1.copy(); pm = s2.piece_map(); del pm[chess.D5]; s2.set_piece_map(pm)
+    gd = compute_guidance(g, s2, fixing=gd.fixing)
     assert gd.highlight == [chess.D5] and "leuchtende Feld" in gd.instruction
 
     # done: pawn now on d5, e4 empty
     expected = board.copy(); expected.push_uci("e4d5")
-    gd = compute_guidance(g, expected)
+    gd = compute_guidance(g, expected, fixing=gd.fixing)
     assert gd.highlight == [] and gd.status == "Der Computer hat gezogen"
 
 
