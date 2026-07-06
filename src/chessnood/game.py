@@ -45,6 +45,27 @@ def detect_move(board: chess.Board, reading: BoardReading) -> tuple[Detection, c
     return Detection.INVALID, None
 
 
+def _is_start_setup(pieces: dict[int, chess.Piece]) -> bool:
+    """True if the pieces are set up for a new game -- every piece on its home
+    RANK with the standard pawn structure -- even if back-rank pieces are in the
+    wrong ORDER (most commonly the white king and queen swapped, the classic
+    "queen on her colour" mix-up). Recognising this lets a new game start even
+    from a slightly-wrong setup; the one-at-a-time guidance then corrects the
+    order. Strict enough never to match a real mid-game position: it requires
+    exactly the start squares occupied and each rank to hold the start's pieces."""
+    start = chess.Board().piece_map()
+    if set(pieces) != set(start):
+        return False
+
+    def by_rank(pm: dict[int, chess.Piece]) -> dict[int, list[str]]:
+        ranks: dict[int, list[str]] = {}
+        for sq, piece in pm.items():
+            ranks.setdefault(chess.square_rank(sq), []).append(piece.symbol())
+        return {r: sorted(v) for r, v in ranks.items()}
+
+    return by_rank(pieces) == by_rank(start)
+
+
 @dataclass
 class Reaction:
     """What the runner should do after feeding a reading."""
@@ -92,12 +113,17 @@ class ChessGame:
                 return self._begin_play()
             return Reaction(message="Waiting for start position")
 
-        # Auto new game: once a game has started, putting every piece back in the
+        # Auto new game: once a game has started, putting the pieces back in the
         # initial position is the "new game" signal -- no button or touch needed.
         if self._is_restart_request(reading):
             self.board.reset()
             self.pending_engine_move = None
-            return self._begin_play()
+            if reading.matches(self.board):
+                return self._begin_play()          # exact start -> straight into play
+            # start-shaped but a back-rank piece is misplaced (e.g. king/queen
+            # swapped): go to setup so the guidance walks them to the right squares.
+            self.state = GameState.NEED_SETUP
+            return Reaction(message="New game: set up the pieces")
 
         if self.state == GameState.PLAYER_TURN:
             return self._handle_player(reading)
@@ -126,7 +152,7 @@ class ChessGame:
         at_start = self.board.piece_map() == chess.Board().piece_map()
         if self.state != GameState.GAME_OVER and at_start:
             return False
-        return reading.matches(chess.Board())
+        return _is_start_setup(reading.pieces)
 
     def _handle_player(self, reading: BoardReading) -> Reaction:
         detection, move = detect_move(self.board, reading)

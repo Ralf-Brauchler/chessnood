@@ -98,6 +98,43 @@ def test_auto_new_game_when_pieces_reset_to_start():
     assert not react.engine_should_move
 
 
+def _kq_swapped_start() -> chess.Board:
+    """The start position with the white king and queen swapped (d1/e1) -- the
+    classic setup mix-up."""
+    b = chess.Board()
+    pm = b.piece_map()
+    pm[chess.D1], pm[chess.E1] = pm[chess.E1], pm[chess.D1]
+    b.set_piece_map(pm)
+    return b
+
+
+def test_new_game_recognised_with_king_queen_swapped():
+    """Mid-game, setting up a start-shaped position with the king and queen
+    swapped must still start a new game (into setup, so the guidance fixes the
+    order) -- not stay stuck because it isn't an *exact* start position."""
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))
+    b = chess.Board(); b.push_uci("e2e4"); game.feed(reading_of(b))
+    game.set_engine_move(chess.Move.from_uci("e7e5"))   # ENGINE_MOVE_SHOWN, mid-game
+    react = game.feed(reading_of(_kq_swapped_start()))  # start shape, K/Q swapped
+    assert game.state == GameState.NEED_SETUP           # new game, guiding the fix
+    assert game.board.fen() == chess.STARTING_FEN       # internal board reset to standard
+    assert game.pending_engine_move is None
+    # once the exact start is set up, play begins
+    react = game.feed(reading_of(chess.Board()))
+    assert game.state == GameState.PLAYER_TURN
+
+
+def test_is_start_setup_rejects_a_midgame_position():
+    from chessnood.game import _is_start_setup
+    b = chess.Board()
+    for uci in ("e2e4", "e7e5", "g1f3"):
+        b.push_uci(uci)
+    assert not _is_start_setup(b.piece_map())
+    assert _is_start_setup(chess.Board().piece_map())
+    assert _is_start_setup(_kq_swapped_start().piece_map())
+
+
 def test_no_false_restart_at_first_move():
     game = ChessGame(human_color=chess.WHITE)
     game.feed(reading_of(chess.Board()))               # PLAYER_TURN, no moves yet
