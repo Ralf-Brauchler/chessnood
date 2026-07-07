@@ -183,6 +183,13 @@ class ChessGame:
         if detection == Detection.NONE:
             return Reaction()
         if detection == Detection.INVALID:
+            # A castling / en passant executed one piece at a time momentarily
+            # matches no legal move; don't flag it as wrong -- wait for it to be
+            # finished (compute_guidance then guides the second piece).
+            sensed = chess.Board(None)
+            sensed.set_piece_map(dict(reading.pieces))
+            if _partial_multistep_move(self.board, sensed) is not None:
+                return Reaction()
             return Reaction(invalid=True)
         assert move is not None
         self.board.push(move)
@@ -362,6 +369,52 @@ def _needs_all_leds(game: chess.Board, move: chess.Move) -> bool:
     return game.is_castling(move) or game.is_en_passant(move) or bool(move.promotion)
 
 
+def _partial_multistep_move(board: chess.Board, sensed: chess.Board) -> chess.Move | None:
+    """If ``sensed`` is a legal castling or en-passant move caught **mid-execution**
+    -- one piece already on its final square, the other not yet moved -- return
+    that move. Such a half-done position matches no single legal move, so without
+    this it reads as a wrong position: the board would alarm and, worse, tell the
+    player to put the king *back*, undoing the castling he just started.
+
+    A position qualifies only if every square already holds either its *starting*
+    piece or its correct *final* piece (nothing anywhere is wrong) and it is
+    strictly between the two -- so a genuinely wrong placement can't match.
+
+    Only king-first castling is recognised: a rook moved first is indistinguishable
+    from an ordinary rook move (and the touch-move rule says move the king first).
+    """
+    smap, startmap = sensed.piece_map(), board.piece_map()
+    for move in board.legal_moves:
+        if not (board.is_castling(move) or board.is_en_passant(move)):
+            continue
+        expected = board.copy(stack=False)
+        expected.push(move)
+        emap = expected.piece_map()
+        squares = set(startmap) | set(emap) | set(smap)
+        if (smap != startmap and smap != emap
+                and all(smap.get(sq) in (startmap.get(sq), emap.get(sq)) for sq in squares)):
+            return move
+    return None
+
+
+def _partial_move_guidance(board: chess.Board, sensed: chess.Board,
+                           move: chess.Move) -> tuple[list[int], str]:
+    """Squares to light and a plain instruction to *finish* a half-done castling or
+    en-passant move (see :func:`_partial_multistep_move`)."""
+    involved, _ = _engine_move_guidance(board, move)
+    expected = board.copy(stack=False)
+    expected.push(move)
+    emap, smap = expected.piece_map(), sensed.piece_map()
+    remaining = [sq for sq in involved if smap.get(sq) != emap.get(sq)]
+    if board.is_castling(move):
+        return remaining, "Ziehe jetzt auch den Turm auf das leuchtende Feld."
+    captured = chess.square(chess.square_file(move.to_square),
+                            chess.square_rank(move.from_square))
+    if captured in smap:                       # the captured pawn is still on the board
+        return [captured], "Nimm noch den geschlagenen Bauern vom leuchtenden Feld."
+    return remaining, "Führe deinen Zug zu Ende."
+
+
 def _engine_move_guidance(game: chess.Board, move: chess.Move) -> tuple[list[int], str]:
     """Squares to light and a plain instruction for executing the engine's move."""
     involved = [move.from_square, move.to_square]
@@ -414,6 +467,13 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
             return Guidance("Umwandlung",
                             "Ersetze den Bauern auf dem leuchtenden Feld durch eine Dame.",
                             [promo])
+        # A legal castling / en passant done one piece at a time: guide the player
+        # to finish it, rather than flagging the half-done position as wrong.
+        if fixing is None:
+            partial = _partial_multistep_move(board, sensed)
+            if partial is not None:
+                hl, instr = _partial_move_guidance(board, sensed, partial)
+                return Guidance("Zug noch nicht fertig", instr, hl, alert=False)
         # Wrong pieces on the board: guide the fix one whole piece at a time.
         hl, instr, alert, new_fixing = _plan_recovery(sensed, board, fixing)
         if hl:

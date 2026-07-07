@@ -1,6 +1,7 @@
 """Tests for the on-screen / on-board guidance (self-healing + special moves)."""
 import chess
 
+from chessnood.boards.base import BoardReading
 from chessnood.game import ChessGame, GameState, compute_guidance
 
 
@@ -212,4 +213,64 @@ def test_engine_move_wrong_execution_alerts():
     pm = wrong.piece_map(); pm[chess.A4] = pm.pop(chess.A2)  # moved the wrong pawn
     wrong.set_piece_map(pm)
     gd = compute_guidance(g, wrong)
+    assert gd.alert
+
+
+# --- player-side castling / en passant done one piece at a time ----------
+# The player nearly always moves the king first when castling (touch-move rule),
+# leaving a half-done position that matches no single legal move. It must NOT read
+# as a wrong position (no alarm, no "put the king back"): guide the rook instead.
+
+_CASTLE_FEN = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"
+
+
+def _king_moved(fen: str, frm: int, to: int) -> chess.Board:
+    b = chess.Board(fen)
+    pm = b.piece_map(); pm[to] = pm.pop(frm); b.set_piece_map(pm)
+    return b
+
+
+def test_player_castling_king_first_is_not_wrong():
+    g = _game(_CASTLE_FEN, GameState.PLAYER_TURN)
+    # king already on g1, rook still on h1 -- half-done kingside castling
+    sensed = _king_moved(_CASTLE_FEN, chess.E1, chess.G1)
+    gd = compute_guidance(g, sensed, fixing=None)
+    assert not gd.alert                                   # no "das passt nicht"
+    assert chess.E1 not in gd.highlight                   # never asks to undo the king
+    assert {chess.H1, chess.F1} == set(gd.highlight)      # light the rook to move
+    assert "Turm" in gd.instruction
+
+
+def test_player_castling_king_first_does_not_commit_or_alarm():
+    """feed() must not flag the half-done castling as invalid, nor commit a move."""
+    g = _game(_CASTLE_FEN, GameState.PLAYER_TURN)
+    sensed = _king_moved(_CASTLE_FEN, chess.E1, chess.G1)
+    reaction = g.feed(BoardReading.from_board(sensed))
+    assert not reaction.invalid                           # no alarm beep
+    assert g.state == GameState.PLAYER_TURN                # nothing committed yet
+    # completing it (rook to f1) is recognised as the castling move
+    done = chess.Board(_CASTLE_FEN); done.push_uci("e1g1")
+    reaction = g.feed(BoardReading.from_board(done))
+    assert g.board.peek() == chess.Move.from_uci("e1g1")
+    assert g.state == GameState.ENGINE_THINKING
+
+
+def test_player_en_passant_pawn_first_is_not_wrong():
+    fen = "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1"             # white Pe5, black pd5, ep on d6
+    g = _game(fen, GameState.PLAYER_TURN)
+    # white pawn advanced to d6 but the captured black pawn still on d5
+    sensed = chess.Board(fen)
+    pm = sensed.piece_map(); pm[chess.D6] = pm.pop(chess.E5); sensed.set_piece_map(pm)
+    gd = compute_guidance(g, sensed, fixing=None)
+    assert not gd.alert
+    assert gd.highlight == [chess.D5]                     # light the pawn to remove
+    reaction = g.feed(BoardReading.from_board(sensed))
+    assert not reaction.invalid
+
+
+def test_real_wrong_position_still_alarms():
+    """The partial-move escape must not swallow a genuinely wrong placement."""
+    g = _game(_CASTLE_FEN, GameState.PLAYER_TURN)
+    sensed = _king_moved(_CASTLE_FEN, chess.A1, chess.A5)  # rook wandered off
+    gd = compute_guidance(g, sensed, fixing=None)
     assert gd.alert
