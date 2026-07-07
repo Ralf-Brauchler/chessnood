@@ -101,6 +101,26 @@ def encode_leds(squares: Iterable[int]) -> bytes:
 
 _LED_OFF = CMD_LED + bytes(8)  # all ranks 0 -> every LED off
 
+_HID = None  # cached hidapi backend module
+
+
+def _hidapi():
+    """The hidapi binding, preferring the Linux **hidraw** backend over libusb.
+
+    hidraw opens ``/dev/hidrawN`` directly and leaves the kernel HID driver bound,
+    so it re-enumerates cleanly after a surprise USB removal. The libusb backend
+    detaches the kernel driver and its long-lived context gets poisoned by an
+    unplug (the running process then never sees the board again -- see
+    RESTART_AFTER_LOST_S). We fall back to libusb only if hidraw isn't built.
+    """
+    global _HID
+    if _HID is None:
+        try:
+            import hidraw as _HID
+        except ImportError:
+            import hid as _HID
+    return _HID
+
 
 class UsbBoard(Board):
     def __init__(self, stale_timeout_s: float = 0.0) -> None:
@@ -191,7 +211,7 @@ class UsbBoard(Board):
                 time.sleep(RECONNECT_DELAY_S)
 
     def _connect_once(self) -> None:
-        import hid
+        hid = _hidapi()
 
         path = _find_device(hid)
         if path is None:
@@ -315,9 +335,9 @@ def open_diag(prefix: bool = True) -> DiagDevice:
     """Open the first attached Chessnut board for diagnostics.
 
     Raises ``RuntimeError`` if no board is found (the CLI turns that into a
-    friendly message). ``import hid`` here so the dependency stays optional.
+    friendly message). The hidapi backend is loaded lazily so it stays optional.
     """
-    import hid
+    hid = _hidapi()
 
     path = _find_device(hid)
     if path is None:
@@ -331,11 +351,11 @@ def open_diag(prefix: bool = True) -> DiagDevice:
 def _find_device(hid) -> str | None:
     """Return the HID path of the first Chessnut board, or None.
 
-    On macOS/Windows hidapi reports the vendor usage page (0xFF00), which picks
-    the control interface out of the board's several HID collections. On Linux
-    the hidraw backend reports usage_page 0 (verified on a Pro: a single
-    interface, usage_page 0x0000 -- see docs/HARDWARE.md rung 1), so there we
-    can only match on the product id, the same filter ``scan`` uses.
+    Some backends report the vendor usage page (0xFF00), which picks the control
+    interface out of the board's several HID collections; others (notably the
+    libusb backend on Linux) report usage_page 0. We prefer a 0xFF00 match when
+    present and otherwise fall back to the sole product-id match, so it works on
+    either backend.
     """
     candidates = [
         info for info in hid.enumerate(VENDOR_ID, 0)
@@ -353,7 +373,7 @@ def _find_device(hid) -> str | None:
 
 def list_devices() -> list[tuple[str, int]]:
     """List attached Chessnut boards as (description, product_id). For the CLI."""
-    import hid
+    hid = _hidapi()
 
     found = []
     for info in hid.enumerate(VENDOR_ID, 0):
