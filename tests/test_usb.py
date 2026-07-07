@@ -181,3 +181,54 @@ def test_failed_led_write_invalidates_dedup_cache():
     board._last_led_payload = usb.encode_leds([chess.E2])  # pretend we sent e2
     board._write(usb.encode_leds([chess.E2]))              # fails internally
     assert board._last_led_payload is None                 # cache dropped -> will resend
+
+
+# --- self-restart on an unrecoverable disconnect ---------------------------
+
+def _raise_no_board():
+    raise RuntimeError("no Chessnut USB board found")
+
+
+def test_reconnect_exits_for_restart_after_a_lost_link(monkeypatch):
+    """Board was connected, then lost and unrecoverable: the maintain loop exits
+    (systemd then restarts with a fresh libusb context)."""
+    board = usb.UsbBoard()
+    board._run = True
+    board._connected_once = True                       # we HAD a working link
+    monkeypatch.setattr(board, "_connect_once", _raise_no_board)
+    clock = {"t": 0.0}
+    monkeypatch.setattr(usb.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(usb.time, "sleep", lambda _: clock.__setitem__("t", clock["t"] + 10))
+
+    class _Exit(Exception):
+        pass
+
+    def fake_exit(code):
+        raise _Exit()
+    monkeypatch.setattr(usb.os, "_exit", fake_exit)
+
+    import pytest
+    with pytest.raises(_Exit):
+        board._maintain()                              # gives up within ~2 retries (>15s)
+
+
+def test_reconnect_waits_forever_when_never_connected(monkeypatch):
+    """Pi booted before the board was plugged in (never connected): keep retrying,
+    never exit -- so it can't restart-loop waiting for a board."""
+    board = usb.UsbBoard()
+    board._run = True
+    board._connected_once = False                      # never opened the board
+    monkeypatch.setattr(board, "_connect_once", _raise_no_board)
+    monkeypatch.setattr(usb.time, "monotonic", lambda: 1e9)   # lots of time passes
+    calls = {"n": 0}
+
+    def fake_sleep(_):
+        calls["n"] += 1
+        if calls["n"] >= 5:
+            board._run = False                         # stop the loop after a few tries
+    monkeypatch.setattr(usb.time, "sleep", fake_sleep)
+    monkeypatch.setattr(usb.os, "_exit",
+                        lambda code: (_ for _ in ()).throw(AssertionError("must not exit")))
+
+    board._maintain()                                  # returns cleanly, no exit
+    assert calls["n"] == 5

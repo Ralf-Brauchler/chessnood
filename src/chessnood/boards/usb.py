@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from typing import Iterable
@@ -54,6 +55,14 @@ BOARD_DATA_LEN = 32    # 32 bytes -> 64 squares (2 per byte)
 _CHESS_PIECES = "0qkbpnRPrBNQK"
 
 RECONNECT_DELAY_S = 3.0
+# If the board was connected, is then lost, and can't be re-opened for this long,
+# the process exits so systemd restarts it. A surprise USB removal can poison the
+# long-lived libusb/hidapi context so the *running* process never re-enumerates
+# the board even after it comes back -- but a *fresh* process reconnects fine
+# (verified on the Pi). Only triggers after a real connection was lost, so a Pi
+# that merely booted before the board is plugged in waits patiently and never
+# restart-loops.
+RESTART_AFTER_LOST_S = 15.0
 
 
 def decode_board_report(report: bytes) -> dict[int, chess.Piece]:
@@ -104,6 +113,8 @@ class UsbBoard(Board):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_write = 0.0
         self._last_led_payload: bytes | None = None
+        self._connected_once = False  # have we ever opened the board in this process?
+        self._link_up = False         # did the current _connect_once reach CONNECTED?
         # If > 0, force a reconnect after this many seconds without a board report
         # (catches a board whose firmware/USB wedged but stays enumerated, so the
         # app would otherwise sit on a dead "connected" link forever). Off by
@@ -147,7 +158,9 @@ class UsbBoard(Board):
 
     # --- thread side ------------------------------------------------------
     def _maintain(self) -> None:
+        lost_since: float | None = None
         while self._run:
+            self._link_up = False
             try:
                 self._connect_once()
             except Exception as exc:  # noqa: BLE001
@@ -160,6 +173,19 @@ class UsbBoard(Board):
                     except Exception:  # noqa: BLE001
                         pass
                     self._dev = None
+            # Give up (and let systemd restart us with a fresh libusb context) only
+            # if we HAD a link and can't get it back for a while -- see
+            # RESTART_AFTER_LOST_S. A board that was never connected (Pi booted
+            # first) just waits, so this can't restart-loop.
+            if self._link_up:
+                lost_since = None
+            elif self._connected_once and self._run:
+                now = time.monotonic()
+                lost_since = lost_since if lost_since is not None else now
+                if now - lost_since >= RESTART_AFTER_LOST_S:
+                    log.error("Board lost and unrecoverable for %.0fs; exiting for a "
+                              "clean restart", RESTART_AFTER_LOST_S)
+                    os._exit(1)
             if self._run:
                 self._post_state(ConnectionState.DISCONNECTED)
                 time.sleep(RECONNECT_DELAY_S)
@@ -179,6 +205,8 @@ class UsbBoard(Board):
         # let the next set_leds through unconditionally.
         self._last_led_payload = None
         self._write(CMD_REALTIME)
+        self._connected_once = True
+        self._link_up = True
         self._post_state(ConnectionState.CONNECTED)
         log.info("Connected to board over USB")
 
