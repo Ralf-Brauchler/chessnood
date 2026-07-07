@@ -98,3 +98,16 @@ def test_engine_retry_is_rate_limited(monkeypatch):
     eng.best_move(chess.Board())
     eng.best_move(chess.Board())              # _open left _engine None; backoff now in future
     assert opened["count"] == 1
+
+
+def test_fallback_move_is_legal():
+    eng = _missing_engine()
+    b = chess.Board(); b.push_uci("e2e4")
+    assert eng.fallback_move(b) in set(b.legal_moves)
+    eng.close()
+
+
+def test_abandon_is_safe_without_an_engine():
+    eng = _missing_engine()          # no engine running (binary missing)
+    eng.abandon()                    # must not raise
+    assert eng._engine is None

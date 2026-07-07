@@ -82,12 +82,17 @@ class ChessGame:
         self.board = chess.Board()
         self.state = GameState.NEED_SETUP
         self.pending_engine_move: chess.Move | None = None
+        # Bumped on every new game / restart. The runner captures it before the
+        # engine thinks and discards the engine's move if it changed meanwhile --
+        # i.e. the player set up the start position while the computer was thinking.
+        self.generation = 0
 
     # --- control ----------------------------------------------------------
     def new_game(self) -> Reaction:
         self.board.reset()
         self.pending_engine_move = None
         self.state = GameState.NEED_SETUP
+        self.generation += 1
         return Reaction(leds=[], message="New game: set up the pieces")
 
     def _begin_play(self) -> Reaction:
@@ -118,6 +123,7 @@ class ChessGame:
         if self._is_restart_request(reading):
             self.board.reset()
             self.pending_engine_move = None
+            self.generation += 1  # so a move the engine is mid-computing is discarded
             if reading.matches(self.board):
                 return self._begin_play()          # exact start -> straight into play
             # start-shaped but a back-rank piece is misplaced (e.g. king/queen
@@ -139,7 +145,10 @@ class ChessGame:
 
         Only meaningful once play has progressed (or the game is over) -- at the
         very first move the board legitimately *is* the start position, which is
-        normal play, not a restart. Ignored while the engine is thinking.
+        normal play, not a restart. Allowed even while the engine is thinking, so
+        the player is never stuck through a long/hung computer turn (the runner
+        discards a now-stale engine move via ``generation``); board noise won't
+        trip it because ``_is_start_setup`` needs the whole start position.
 
         The "have we progressed?" test compares the tracked *position* to the
         start, NOT ``move_stack``: a game resumed from disk (``restore``) rebuilds
@@ -147,8 +156,6 @@ class ChessGame:
         keying off ``move_stack`` would wrongly refuse to restart a resumed game
         (the player sets up the start position and nothing happens).
         """
-        if self.state == GameState.ENGINE_THINKING:
-            return False
         at_start = self.board.piece_map() == chess.Board().piece_map()
         if self.state != GameState.GAME_OVER and at_start:
             return False

@@ -98,6 +98,70 @@ def test_cleanup_lights_one_led_then_destination(tmp_path):
     assert r._ui.status == "Du bist am Zug" and r._ui.highlight == []
 
 
+def test_engine_hang_times_out_and_plays_a_fallback(tmp_path, monkeypatch):
+    """A wedged engine (best_move never returns) is abandoned within the hard
+    timeout and a fallback move is played, so the turn never freezes."""
+    import threading
+    from chessnood import runner as runner_mod
+
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("board:\n  backend: mock\n  settle_ms: 0\n"
+                   "engine:\n  move_time_ms: 20\ndisplay:\n  backend: none\n"
+                   f"game_state_file: {tmp_path / 'g.json'}\n")
+    r = Runner(MockBoard(), ConfigWatcher(str(cfg)))
+    r._display = RecordingDisplay()
+    r._game.state = GameState.ENGINE_THINKING
+    r._game.board.push_uci("e2e4")                     # black (engine) to move
+    monkeypatch.setattr(runner_mod, "ENGINE_HARD_TIMEOUT_MARGIN_S", 0.1)
+
+    release = threading.Event()
+
+    class HangEngine:
+        abandoned = False
+        def best_move(self, board):
+            release.wait(0.5)                          # "hangs" (released at test end)
+            return next(iter(board.legal_moves))
+        def fallback_move(self, board):
+            return next(iter(board.legal_moves))
+        def abandon(self):
+            HangEngine.abandoned = True
+            release.set()
+        def configure(self, cfg):
+            pass
+    r._engine = HangEngine()
+
+    asyncio.run(r._do_engine_move())
+    release.set()
+    assert HangEngine.abandoned                        # the wedged engine was dropped
+    assert r._game.state == GameState.ENGINE_MOVE_SHOWN
+    assert r._game.pending_engine_move is not None     # a fallback move is shown
+
+
+def test_engine_move_discarded_if_game_restarted_while_thinking(tmp_path):
+    """If the player sets up the start position while the engine is thinking, the
+    now-stale engine move is discarded rather than forced onto the new game."""
+    r = _runner(tmp_path)
+    r._game.state = GameState.ENGINE_THINKING
+    r._game.board.push_uci("e2e4")
+
+    game = r._game
+
+    class RestartDuringThink:
+        def best_move(self, board):
+            game.generation += 1                       # simulate a mid-think restart
+            game.state = GameState.PLAYER_TURN
+            return next(iter(board.legal_moves))
+        def fallback_move(self, board):
+            return next(iter(board.legal_moves))
+        def configure(self, cfg):
+            pass
+    r._engine = RestartDuringThink()
+
+    asyncio.run(r._do_engine_move())
+    assert r._game.state == GameState.PLAYER_TURN       # not forced to ENGINE_MOVE_SHOWN
+    assert r._game.pending_engine_move is None          # the stale move was dropped
+
+
 def test_save_game_writes_a_restorable_file(tmp_path):
     r = _runner(tmp_path)
     r._game.board.push_uci("e2e4")

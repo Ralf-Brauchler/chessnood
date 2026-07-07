@@ -125,6 +125,21 @@ def test_new_game_recognised_with_king_queen_swapped():
     assert game.state == GameState.PLAYER_TURN
 
 
+def test_restart_recognised_while_engine_thinking():
+    """The start position must reset the game even during 'Computer denkt', so the
+    player is never stuck through a long/hung computer turn. Generation bumps so
+    the runner discards the stale engine move."""
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))               # -> PLAYER_TURN
+    b = chess.Board(); b.push_uci("e2e4")
+    game.feed(reading_of(b))                            # -> ENGINE_THINKING
+    assert game.state == GameState.ENGINE_THINKING
+    gen = game.generation
+    game.feed(reading_of(chess.Board()))                # start position mid-think
+    assert game.state == GameState.PLAYER_TURN          # new game began
+    assert game.generation != gen                       # -> runner discards the move
+
+
 def test_is_start_setup_rejects_a_midgame_position():
     from chessnood.game import _is_start_setup
     b = chess.Board()

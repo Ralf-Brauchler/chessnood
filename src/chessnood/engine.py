@@ -7,7 +7,9 @@ This is what lets the whole project work on your Mac before anything is set up.
 from __future__ import annotations
 
 import logging
+import os
 import random
+import signal
 import time
 
 import chess
@@ -88,7 +90,31 @@ class Engine:
                 log.warning("Engine failed mid-game (%s); falling back to random moves", exc)
                 self.close()
                 self._next_retry = time.monotonic() + REOPEN_BACKOFF_S
+        return self.fallback_move(board)
+
+    def fallback_move(self, board: chess.Board) -> chess.Move:
+        """A legal random move -- used when no engine is available or one hung."""
         return random.choice(list(board.legal_moves))
+
+    def abandon(self) -> None:
+        """Forcibly kill a wedged engine whose move never came back, so a fresh one
+        is opened next turn. SIGKILL, not a clean quit, because a hung engine won't
+        answer -- and a graceful quit could itself block. Also unblocks the leaked
+        best_move thread (its play() then raises EngineTerminatedError)."""
+        eng = self._engine
+        self._engine = None
+        self._next_retry = time.monotonic() + REOPEN_BACKOFF_S
+        if eng is None:
+            return
+        try:
+            pid = eng.transport.get_pid()
+        except Exception:  # noqa: BLE001 - transport shape varies; best effort
+            pid = None
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
 
     def close(self) -> None:
         if self._engine is not None:

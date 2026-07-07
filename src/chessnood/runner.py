@@ -28,6 +28,10 @@ from . import watchdog
 
 log = logging.getLogger(__name__)
 
+# Hard wall-clock budget for an engine move = its think time + this margin (for
+# process start-up / UCI round-trips). Past it we treat the engine as wedged.
+ENGINE_HARD_TIMEOUT_MARGIN_S = 5.0
+
 
 def _board_from_pieces(pieces: dict) -> chess.Board:
     """A board carrying just the sensed piece placement, for rendering."""
@@ -238,5 +242,24 @@ class Runner:
             self._engine.configure(cfg.engine)
             self._status.update(skill_level=cfg.engine.skill_level)
 
-        move = await asyncio.to_thread(self._engine.best_move, self._game.board)
+        # Think on a COPY so a concurrent restart (board.reset in feed) can't race
+        # the engine thread. Cap the wall-clock so a wedged engine never freezes
+        # the turn on "Computer denkt" forever: kill it and play a fallback move.
+        gen = self._game.generation
+        timeout_s = cfg.engine.move_time_ms / 1000.0 + ENGINE_HARD_TIMEOUT_MARGIN_S
+        try:
+            move = await asyncio.wait_for(
+                asyncio.to_thread(self._engine.best_move, self._game.board.copy()),
+                timeout=timeout_s)
+        except asyncio.TimeoutError:
+            log.warning("Engine did not answer within %.1fs; abandoning it and "
+                        "playing a fallback move", timeout_s)
+            self._engine.abandon()
+            move = self._engine.fallback_move(self._game.board)
+
+        # If the player set up the start position while we were thinking, a new
+        # game has begun -- drop this now-stale move rather than forcing it.
+        if self._game.generation != gen:
+            log.info("New game started while the engine was thinking; move discarded")
+            return
         await self._apply(self._game.set_engine_move(move))
