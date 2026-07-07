@@ -140,6 +140,29 @@ def test_restart_recognised_while_engine_thinking():
     assert game.generation != gen                       # -> runner discards the move
 
 
+def test_accept_position_adopts_a_valid_board_with_human_to_move():
+    g = ChessGame(human_color=chess.WHITE)
+    g.feed(reading_of(chess.Board()))                  # PLAYER_TURN
+    # a legal but non-single-move position (two white pawns advanced)
+    sensed = chess.Board(); sensed.push_uci("e2e4"); sensed.push_uci("e7e5"); sensed.push_uci("d2d4")
+    gen = g.generation
+    react = g.accept_position(sensed)
+    assert react.message                               # adopted
+    assert g.state == GameState.PLAYER_TURN
+    assert g.board.turn == chess.WHITE                 # the player moves next
+    assert g.board.piece_at(chess.D4) and g.board.piece_at(chess.E4)
+    assert g.generation != gen                         # bumped (discards any pending)
+
+
+def test_accept_position_refuses_an_illegal_board():
+    g = ChessGame(human_color=chess.WHITE)
+    sensed = chess.Board(None)
+    sensed.set_piece_map({chess.E4: chess.Piece(chess.PAWN, chess.WHITE)})  # no kings
+    react = g.accept_position(sensed)
+    assert not react.message                           # not adopted
+    assert g.board.piece_at(chess.E4) is None          # game board unchanged
+
+
 def test_is_start_setup_rejects_a_midgame_position():
     from chessnood.game import _is_start_setup
     b = chess.Board()

@@ -102,6 +102,23 @@ class ChessGame:
         self.state = GameState.ENGINE_THINKING
         return Reaction(engine_should_move=True, message="Computer to move")
 
+    def accept_position(self, sensed: chess.Board) -> Reaction:
+        """Adopt the physically sensed position as the current game, with the human
+        to move -- an escape hatch when a wrong position is left uncorrected for a
+        long time (the runner drives the timeout). Only adopts a legal chess
+        position; an impossible one (e.g. a king missing) can't be played, so we
+        leave the guidance to keep asking for a fix (empty Reaction)."""
+        board = chess.Board(None)                 # empty: no castling/ep, turn White
+        board.set_piece_map(sensed.piece_map())
+        board.turn = self.human_color             # "let the player make his next move"
+        if not board.is_valid():
+            return Reaction()
+        self.board = board
+        self.pending_engine_move = None
+        self.state = GameState.PLAYER_TURN
+        self.generation += 1
+        return Reaction(message="Accepted the board as it stands; your move")
+
     def set_engine_move(self, move: chess.Move) -> Reaction:
         """Called by the runner once the engine has chosen its move."""
         self.pending_engine_move = move

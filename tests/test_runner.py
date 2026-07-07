@@ -215,6 +215,47 @@ def test_no_cross_for_non_capture_or_when_disabled(tmp_path):
     asyncio.run(run())
 
 
+def test_accept_wrong_position_after_the_timeout(tmp_path):
+    """When the timer fires on a stuck wrong position, the runner adopts the sensed
+    board and it becomes the player's turn (guidance clears)."""
+    r = _runner(tmp_path)
+    r._connection = ConnectionState.CONNECTED
+    r._game.state = GameState.PLAYER_TURN
+    r._game.board = chess.Board()                       # tracked = start position
+    # sensed = a different, legal position (two pawns moved) -> a wrong state
+    sensed = chess.Board(); sensed.push_uci("e2e4"); sensed.push_uci("e7e5"); sensed.push_uci("d2d4")
+    r._sensed = _pieces(sensed)
+    r._recompute_guidance()
+    assert r._ui.alert                                  # it's a wrong position
+
+    asyncio.run(r._accept_wrong_position())
+    assert r._game.state == GameState.PLAYER_TURN
+    assert r._game.board.turn == chess.WHITE
+    assert r._game.board.piece_at(chess.D4) and r._game.board.piece_at(chess.E4)
+    assert not r._ui.alert                              # now "your move", no longer wrong
+
+
+def test_accept_timer_not_armed_when_position_is_right(tmp_path):
+    r = _runner(tmp_path)
+    r._loop = asyncio.new_event_loop()
+    try:
+        r._game.state = GameState.PLAYER_TURN
+        r._sensed = chess.Board()                       # matches the tracked board
+        r._recompute_guidance()
+        assert not r._ui.alert
+        r._arm_accept_timer()
+        assert r._accept_handle is None                 # nothing to accept -> no timer
+        # now a wrong position -> a timer is armed
+        sensed = chess.Board(); sensed.push_uci("e2e4"); sensed.push_uci("e7e5"); sensed.push_uci("d2d4")
+        r._sensed = _pieces(sensed)
+        r._recompute_guidance()
+        r._arm_accept_timer()
+        assert r._accept_handle is not None
+        r._accept_handle.cancel()
+    finally:
+        r._loop.close()
+
+
 def test_save_game_writes_a_restorable_file(tmp_path):
     r = _runner(tmp_path)
     r._game.board.push_uci("e2e4")

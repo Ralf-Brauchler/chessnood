@@ -85,6 +85,11 @@ class Runner:
         self._cross_until = 0.0                     # board shows the cross until this time
         self._crossed_move: chess.Move | None = None  # capture already flashed for
         self._cross_square: int | None = None
+        # Escape hatch: if a wrong position sits uncorrected this long, adopt it and
+        # let the player carry on (0 = never). A one-shot timer, re-armed on every
+        # committed reading while wrong, cancelled once the board is right again.
+        self._accept_after_s = cfg.board.accept_wrong_after_s
+        self._accept_handle: asyncio.TimerHandle | None = None
         self._game_file = Path(cfg.game_state_file) if cfg.game_state_file else None
         self._load_game()
 
@@ -224,9 +229,38 @@ class Runner:
         # the board LEDs (primary move indicator) and the screen together.
         await self._apply_guidance(beep=True)
         self._save_game()
+        self._arm_accept_timer()
 
         if reaction.engine_should_move:
             await self._do_engine_move()
+
+    def _arm_accept_timer(self) -> None:
+        """(Re)start the 'accept a stuck wrong position' countdown while the board
+        is in a wrong state; cancel it once things are right again. Re-armed on
+        each committed reading, so it fires only after the position has sat wrong
+        and untouched for the whole window."""
+        if self._accept_handle is not None:
+            self._accept_handle.cancel()
+            self._accept_handle = None
+        wrong = self._ui.alert and self._game.state in (
+            GameState.PLAYER_TURN, GameState.ENGINE_MOVE_SHOWN)
+        if self._accept_after_s > 0 and wrong and self._loop is not None:
+            self._accept_handle = self._loop.call_later(
+                self._accept_after_s, lambda: asyncio.create_task(self._accept_wrong_position()))
+
+    async def _accept_wrong_position(self) -> None:
+        """Timer fired: the wrong position has stood untouched too long. Adopt it
+        (if it's a legal position) and let the player carry on."""
+        self._accept_handle = None
+        if not self._ui.alert or self._connection != ConnectionState.CONNECTED:
+            return
+        reaction = self._game.accept_position(self._sensed)
+        if reaction.message:
+            log.info("Wrong position uncorrected for %ss; accepting the board and "
+                     "continuing", self._accept_after_s)
+            await self._apply(reaction)
+        else:
+            log.info("Wrong position uncorrected but not a legal position; still waiting")
 
     def _recompute_guidance(self) -> None:
         """Recompute guidance for the sensed position, threading the cleanup
