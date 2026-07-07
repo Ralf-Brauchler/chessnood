@@ -77,6 +77,20 @@ def test_decode_ignores_empty_and_out_of_range_codes():
     assert usb.decode_board_report(bytes(data)) == {}
 
 
+def test_decode_battery_level_and_charging():
+    assert usb.decode_battery(bytes([usb.REPORT_BATTERY, 0x01, 87, 1])) == {"level": 87, "charging": True}
+    assert usb.decode_battery(bytes([usb.REPORT_BATTERY, 0x01, 50, 0])) == {"level": 50, "charging": False}
+    # no charging byte -> charging unknown
+    assert usb.decode_battery(bytes([usb.REPORT_BATTERY, 0x01, 42])) == {"level": 42, "charging": None}
+
+
+def test_decode_battery_rejects_invalid():
+    assert usb.decode_battery(bytes([usb.REPORT_BATTERY, 0x01, 0, 0])) is None      # 0 = not ready
+    assert usb.decode_battery(bytes([usb.REPORT_BATTERY, 0x01, 250, 0])) is None    # >100 implausible
+    assert usb.decode_battery(bytes([usb.REPORT_BOARD, 0x01, 80])) is None          # wrong report type
+    assert usb.decode_battery(bytes([usb.REPORT_BATTERY])) is None                  # too short
+
+
 class _FakeHid:
     """Minimal stand-in for the hidapi module."""
 

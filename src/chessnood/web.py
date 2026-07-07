@@ -124,10 +124,16 @@ async function tick() {{
       ((h.service && h.service.active) || 'Dienst?');
     const age = ageSecs(s.updated);
     let upd = s.updated || '–';
-    if (age != null && age > 30) upd = '<span class="stale">' + upd + ' (' + fmtDur(age) + ' alt)</span>';
+    if (age != null && age > 90) upd = '<span class="stale">' + upd + ' (' + fmtDur(age) + ' alt)</span>';
+    let bat = '–', batCls = '';
+    if (s.battery && s.battery.level != null) {{
+      bat = s.battery.level + '%' + (s.battery.charging ? ' (lädt)' : '');
+      batCls = s.battery.level <= 15 ? 'bad' : s.battery.level <= 30 ? 'warn' : 'ok';
+    }}
     document.getElementById('prog').innerHTML =
       '<tr><th colspan="2">Programm</th></tr>' +
       row('Verbindung', s.connection || '–', s.connection === 'connected' ? 'ok' : 'warn') +
+      row('Batterie', bat, batCls) +
       row('Zustand', s.state || '–') +
       row('Anzeige', s.status || '–') +
       row('Hinweis', s.instruction || '–') +

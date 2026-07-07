@@ -48,6 +48,11 @@ class Board(ABC):
     def state(self) -> ConnectionState:
         return self._state
 
+    @property
+    def battery(self) -> dict | None:
+        """Last known battery status {level, charging}, or None if unknown/unsupported."""
+        return None
+
     def _set_state(self, state: ConnectionState) -> None:
         if state != self._state:
             self._state = state

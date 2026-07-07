@@ -37,6 +37,12 @@ ENGINE_HARD_TIMEOUT_MARGIN_S = 5.0
 CAPTURE_CROSS_S = 2.0
 CAPTURE_CROSS_OFF_S = 0.4
 
+# Refresh the status file this often even when nothing changes, so a remote viewer
+# (web page / `chessnood status`) sees a live 'updated' time and a current battery
+# level during a long idle (when no move re-publishes it). Cheap: one small atomic
+# write per interval.
+STATUS_REFRESH_S = 60.0
+
 
 def _board_from_pieces(pieces: dict) -> chess.Board:
     """A board carrying just the sensed piece placement, for rendering."""
@@ -111,6 +117,7 @@ class Runner:
         tasks = [
             asyncio.create_task(self._handle_states(states)),
             asyncio.create_task(self._handle_readings(readings)),
+            asyncio.create_task(self._status_heartbeat()),
             asyncio.create_task(watchdog.heartbeat()),
         ]
         try:
@@ -173,9 +180,17 @@ class Runner:
             "instruction": model.instruction,
             "fen": model.board.fen() if model.board is not None else None,
             "highlight": [chess.square_name(s) for s in model.highlight],
+            "battery": self._board.battery,
         }
         fields.update(extra)
         self._status.update(**fields)
+
+    async def _status_heartbeat(self) -> None:
+        """Periodically republish the status so a remote viewer sees a live
+        'updated' time and current battery even through a long idle (no moves)."""
+        while True:
+            await asyncio.sleep(STATUS_REFRESH_S)
+            self._publish_status()
 
     async def _handle_states(self, states: "asyncio.Queue[ConnectionState]") -> None:
         while True:

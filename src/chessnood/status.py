@@ -23,6 +23,7 @@ class StatusFile:
             "instruction": None,   # one-line plain-language guidance
             "fen": None,           # the position the screen is showing
             "highlight": [],       # squares the board LEDs are lighting (names, e.g. "g1")
+            "battery": None,       # {"level": 1-100, "charging": bool|None} from the board
             "updated": None,
         }
 

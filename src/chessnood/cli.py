@@ -344,6 +344,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     for key in ("connection", "state", "skill_level", "status", "instruction",
                 "last_move", "updated"):
         print(f"  {key:13s}: {data.get(key)}")
+    bat = data.get("battery")
+    if bat:
+        charge = " (charging)" if bat.get("charging") else ""
+        print(f"  {'battery':13s}: {bat.get('level')}%{charge}")
     board = _status_board(data, cfg)
     if board is not None:
         print("\nBoard (what the screen shows):")

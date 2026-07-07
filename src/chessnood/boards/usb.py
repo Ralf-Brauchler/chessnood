@@ -39,6 +39,8 @@ USAGE_PAGE = 0xFF00
 CMD_REALTIME = bytes([0x21, 0x01, 0x00])   # switch to real-time board streaming
 CMD_LED = bytes([0x0A, 0x08])              # + 8 rank bytes
 CMD_BEEP = bytes([0x0B, 0x04])             # + freq (2 bytes) + duration ms (2 bytes)
+CMD_BATTERY = bytes([0x29, 0x01, 0x00])    # request battery status (reply = REPORT_BATTERY)
+REPORT_BATTERY = 0x2A                       # a battery-status report (EasyLinkSDK)
 WRITE_INTERVAL_S = 0.2                      # SDK enforces >=200ms between writes
 # The Pro auto-clears its LEDs shortly after a write (verified on hardware: a
 # single write never stays visibly lit; re-sending every ~0.25s holds it solid).
@@ -72,6 +74,22 @@ RECONNECT_DELAY_S = 3.0
 # that merely booted before the board is plugged in waits patiently and never
 # restart-loops.
 RESTART_AFTER_LOST_S = 15.0
+
+
+def decode_battery(report: bytes) -> dict | None:
+    """Decode a 0x2A battery report -> {"level": 1..100, "charging": bool|None}.
+
+    Level is byte 2 (EasyLinkSDK reads ``readBuf[2]`` directly and treats 0 as
+    "no data yet"). The charging flag in byte 3 is best-effort -- the official SDK
+    doesn't decode it, so treat it as a hint.  # VERIFY charging byte on hardware.
+    """
+    if len(report) < 3 or report[0] != REPORT_BATTERY:
+        return None
+    level = report[2]
+    if level == 0 or level > 100:
+        return None  # 0 = not ready (per SDK); >100 = implausible
+    charging = (report[3] != 0) if len(report) > 3 else None
+    return {"level": level, "charging": charging}
 
 
 def decode_board_report(report: bytes) -> dict[int, chess.Piece]:
@@ -155,6 +173,12 @@ class UsbBoard(Board):
         # board keeps hearing from us and doesn't drop into its (unrecoverable)
         # sleep. 0 = off. See KEEPALIVE_S.
         self._keepalive_s = keepalive_s
+        self._battery: dict | None = None   # last {level, charging} from a 0x2A report
+
+    @property
+    def battery(self) -> dict | None:
+        """Last known battery status {level, charging}, or None until first polled."""
+        return self._battery
 
     async def connect(self) -> None:
         """Start the background read/reconnect loop and return immediately."""
@@ -276,6 +300,7 @@ class UsbBoard(Board):
         # let the next set_leds through unconditionally.
         self._last_led_payload = None
         self._write(CMD_REALTIME)
+        self._write(CMD_BATTERY)          # get an initial battery level promptly
         self._connected_once = True
         self._link_up = True
         self._post_state(ConnectionState.CONNECTED)
@@ -291,6 +316,7 @@ class UsbBoard(Board):
             # into its unrecoverable sleep -- see KEEPALIVE_S.
             if self._keepalive_s and time.monotonic() - last_keepalive >= self._keepalive_s:
                 self._write(CMD_REALTIME)
+                self._write(CMD_BATTERY)   # doubles as keep-alive + refreshes the level
                 last_keepalive = time.monotonic()
             # Re-send the current LED pattern periodically: the board auto-clears
             # its LEDs, so a lit square would otherwise fade during a long think.
@@ -336,6 +362,10 @@ class UsbBoard(Board):
                 if pieces != last_pieces:
                     last_pieces = pieces
                     self._post_reading(BoardReading(pieces))
+            elif data[0] == REPORT_BATTERY:
+                bat = decode_battery(bytes(data))
+                if bat is not None:
+                    self._battery = bat   # read via the .battery property (reference swap)
 
     def _write(self, payload: bytes) -> None:
         # hidapi expects a leading report-ID byte (0x00 = unnumbered reports). The
