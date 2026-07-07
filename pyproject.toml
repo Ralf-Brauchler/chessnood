@@ -17,8 +17,8 @@ dependencies = [
 usb = ["hidapi>=0.14"]
 # Screen rendering (and the `preview` command). Works anywhere.
 display = ["Pillow>=10.1"]
-# Raspberry Pi: USB board + framebuffer screen + touch input. evdev only installs on Linux.
-pi = ["hidapi>=0.14", "Pillow>=10.1", "evdev>=1.6"]
+# Raspberry Pi: USB board + framebuffer status screen (read-only, no touch input).
+pi = ["hidapi>=0.14", "Pillow>=10.1"]
 dev = ["pytest>=8.0", "Pillow>=10.1"]
 
 [project.scripts]

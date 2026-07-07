@@ -4,7 +4,6 @@ Responsibilities:
   * forward board readings into the pure :class:`ChessGame`
   * run the engine off the event loop (it's blocking) when it's the computer's turn
   * drive the board LEDs (the primary move indicator) and the status screen
-  * handle the "Neue Partie" touch on the screen
   * reload engine settings live when config.yaml changes
   * keep the status file up to date
 """
@@ -64,7 +63,6 @@ class Runner:
         self._display = make_display(cfg.display)
         self._status = StatusFile(cfg.status_file)
         self._settle_s = max(0.0, cfg.board.settle_ms / 1000.0)
-        self._new_game_requested = asyncio.Event()
         self._connection = board.state
         self._loop: asyncio.AbstractEventLoop | None = None
         # the last position the board physically sensed (so the screen can show
@@ -95,7 +93,6 @@ class Runner:
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
-        self._display.on_new_game(self._request_new_game)
         self._status.update(state="starting", skill_level=self._watcher.current.engine.skill_level)
         self._recompute_guidance()
         self._refresh_screen()
@@ -114,7 +111,6 @@ class Runner:
         tasks = [
             asyncio.create_task(self._handle_states(states)),
             asyncio.create_task(self._handle_readings(readings)),
-            asyncio.create_task(self._handle_new_game()),
             asyncio.create_task(watchdog.heartbeat()),
         ]
         try:
@@ -144,14 +140,6 @@ class Runner:
         except OSError:
             pass
 
-    def _request_new_game(self) -> None:
-        """Called from the touch thread; hop back onto the event loop."""
-        log.info("New game requested")
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._new_game_requested.set)
-        else:
-            self._new_game_requested.set()
-
     # --- screen -----------------------------------------------------------
     def _refresh_screen(self) -> None:
         if self._connection != ConnectionState.CONNECTED:
@@ -167,12 +155,6 @@ class Runner:
         board = self._ui.target if self._ui.target is not None else self._sensed
         self._display.update(UiModel(self._connection, self._ui.status,
                                      self._ui.instruction, board, self._ui.highlight))
-
-    async def _handle_new_game(self) -> None:
-        while True:
-            await self._new_game_requested.wait()
-            self._new_game_requested.clear()
-            await self._apply(self._game.new_game())
 
     async def _handle_states(self, states: "asyncio.Queue[ConnectionState]") -> None:
         while True:

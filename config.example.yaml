@@ -26,11 +26,10 @@ board:
 game:
   human_color: white     # which colour your father plays: white | black
 
-display:                 # the 3.5" SPI touchscreen (MHS-3.5): status + "Neue Partie" button
+display:                 # the 3.5" SPI TFT (MHS-3.5): read-only status panel (no touch)
   backend: auto          # auto | framebuffer | console | preview | none
                          #   auto = framebuffer if fb_device exists, else console
   fb_device: /dev/fb1    # SPI TFT framebuffer device
-  touch_device: null     # evdev path for the touch panel; null = auto-detect
   rotate: 0              # 0 | 90 | 180 | 270 — screen orientation
   preview_path: ./chessnood-screen.png   # where the "preview" backend writes
 

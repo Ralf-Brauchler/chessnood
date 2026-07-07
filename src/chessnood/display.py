@@ -1,4 +1,4 @@
-"""Touch display UI: plain-language status panel + a "Neue Partie" touch button.
+"""Read-only display UI: a calm, plain-language status panel.
 
 The **board LEDs remain the primary move indicator** for the player (the user's
 father, who does not read algebraic notation). This 3.5" screen is a calm,
@@ -6,19 +6,22 @@ plain-language status panel — and a *visual* highlighted board that doubles as
 fallback should LED-over-BLE turn out not to work on the Pro. It never shows
 coordinates like "e2-e4".
 
-Rendering is pure Pillow and produces an in-memory image; only the output sink
-and the touch input differ per backend, so the exact look can be previewed on a
-Mac (``chessnood preview``) long before the Pi is wired up.
+A new game is started simply by resetting the pieces to the start position; the
+screen has **no touch input** (the resistive panel on the MHS-3.5 is unreliable,
+and an accidental tap must never wipe a game in progress).
 
-⚠️  The framebuffer byte layout, rotation and touch coordinate mapping for the
-MHS-3.5 display are best-effort and flagged ``# VERIFY`` until confirmed on the
-real Pi — same philosophy as ``boards/protocol.py``.
+Rendering is pure Pillow and produces an in-memory image; only the output sink
+differs per backend, so the exact look can be previewed on a Mac
+(``chessnood preview``) long before the Pi is wired up.
+
+⚠️  The framebuffer byte layout and rotation for the MHS-3.5 display are
+best-effort and flagged ``# VERIFY`` until confirmed on the real Pi — same
+philosophy as ``boards/protocol.py``.
 """
 from __future__ import annotations
 
 import logging
 import os
-import threading
 from dataclasses import dataclass, field
 
 import chess
@@ -35,7 +38,6 @@ SCREEN_H = 320
 _BOARD_ORIGIN = (14, 60)
 _BOARD_SIZE = 200
 _PANEL_X = 232
-BUTTON_RECT = (10, 264, 470, 312)  # x0, y0, x1, y1 — the "Neue Partie" touch target
 
 # Colours: dark, high-contrast, low-glare for a living room.
 _BG = (16, 20, 24)
@@ -44,8 +46,6 @@ _MUTED = (150, 158, 168)
 _LIGHT_SQ = (186, 190, 198)
 _DARK_SQ = (92, 99, 110)
 _HILITE = (242, 191, 64)
-_BTN = (39, 110, 72)
-_BTN_FG = (255, 255, 255)
 _CONN_COLOUR = {
     ConnectionState.CONNECTED: (76, 175, 80),
     ConnectionState.SCANNING: (242, 191, 64),
@@ -182,25 +182,10 @@ def render(model: UiModel):
     return img
 
 
-def point_in_button(x: int, y: int) -> bool:
-    x0, y0, x1, y1 = BUTTON_RECT
-    return x0 <= x <= x1 and y0 <= y <= y1
-
-
 # --- backends -------------------------------------------------------------
 
 class Display:
     """Base / no-op display. ``backend: none`` uses this directly."""
-
-    def __init__(self) -> None:
-        self._new_game = None
-
-    def on_new_game(self, handler) -> None:
-        self._new_game = handler
-
-    def _fire_new_game(self) -> None:
-        if self._new_game is not None:
-            self._new_game()
 
     def update(self, model: UiModel) -> None:  # pragma: no cover - no-op
         pass
@@ -234,20 +219,15 @@ class PreviewDisplay(Display):
 
 
 class FramebufferDisplay(Display):
-    """Draw to the SPI TFT framebuffer; read taps from the touch device.
+    """Draw to the SPI TFT framebuffer. Output only -- no touch input.
 
-    Everything hardware-specific (framebuffer geometry/byte order, touch
-    calibration) is best-effort and flagged ``# VERIFY``.
+    Framebuffer geometry/byte order is best-effort and flagged ``# VERIFY``.
     """
 
     def __init__(self, cfg: DisplayConfig) -> None:
-        super().__init__()
         self._cfg = cfg
         self._fb = cfg.fb_device
         self._fb_size, self._bpp = _probe_framebuffer(self._fb)
-        self._stop = threading.Event()
-        self._touch = threading.Thread(target=self._touch_loop, daemon=True)
-        self._touch.start()
 
     def update(self, model: UiModel) -> None:
         img = render(model)
@@ -258,40 +238,6 @@ class FramebufferDisplay(Display):
                 fh.write(_pack(img, self._bpp))
         except OSError as exc:
             log.debug("Framebuffer write failed: %s", exc)
-
-    def close(self) -> None:
-        self._stop.set()
-
-    def _touch_loop(self) -> None:
-        try:
-            from evdev import InputDevice, ecodes, list_devices
-        except Exception as exc:  # noqa: BLE001 - evdev missing/not on a Pi
-            log.info("Touch disabled (evdev unavailable): %s", exc)
-            return
-        path = self._cfg.touch_device or _find_touch(list_devices, InputDevice)
-        if not path:
-            log.info("No touch device found; 'Neue Partie' available over SSH only")
-            return
-        dev = InputDevice(path)
-        ax = dev.absinfo(ecodes.ABS_X)
-        ay = dev.absinfo(ecodes.ABS_Y)
-        x = y = None
-        for event in dev.read_loop():  # pragma: no cover - hardware loop
-            if self._stop.is_set():
-                break
-            if event.type == ecodes.EV_ABS:
-                if event.code == ecodes.ABS_X:
-                    x = event.value
-                elif event.code == ecodes.ABS_Y:
-                    y = event.value
-            elif event.type == ecodes.EV_KEY and event.code == ecodes.BTN_TOUCH and event.value == 1:
-                if x is None or y is None:
-                    continue
-                sx = int((x - ax.min) / max(1, ax.max - ax.min) * SCREEN_W)  # VERIFY calibration
-                sy = int((y - ay.min) / max(1, ay.max - ay.min) * SCREEN_H)  # VERIFY calibration
-                if point_in_button(sx, sy):
-                    log.info("Touch: Neue Partie")
-                    self._fire_new_game()
 
 
 def _probe_framebuffer(device: str) -> tuple[tuple[int, int], int]:
@@ -324,17 +270,6 @@ def _pack(img, bpp: int) -> bytes:
         out[j + 1] = (v >> 8) & 0xFF
         j += 2
     return bytes(out)
-
-
-def _find_touch(list_devices, InputDevice):
-    for path in list_devices():
-        try:
-            name = InputDevice(path).name.lower()
-        except OSError:
-            continue
-        if "touch" in name or "ads7846" in name or "xpt2046" in name:
-            return path
-    return None
 
 
 def make_display(cfg: DisplayConfig) -> Display:

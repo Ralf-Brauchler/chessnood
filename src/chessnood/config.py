@@ -55,15 +55,15 @@ class BoardConfig:
 
 @dataclass
 class DisplayConfig:
-    """The 3.5" SPI touchscreen (MHS-3.5) used as a status + control panel.
+    """The 3.5" SPI TFT (MHS-3.5) used as a read-only status panel.
 
     The board LEDs stay the primary move indicator; this screen shows
-    plain-language status and a big "Neue Partie" touch button.
+    plain-language status. It has no touch input -- a new game is started by
+    resetting the pieces to the start position.
     """
 
     backend: str = "auto"            # auto | framebuffer | console | preview | none
     fb_device: str = "/dev/fb1"      # SPI TFT framebuffer device  # VERIFY on Pi
-    touch_device: str | None = None  # evdev path; None = auto-detect  # VERIFY on Pi
     rotate: int = 0                  # 0 | 90 | 180 | 270  # VERIFY orientation on Pi
     preview_path: str = "./chessnood-screen.png"  # where the "preview" backend writes
 

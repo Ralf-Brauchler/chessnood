@@ -1,4 +1,4 @@
-"""Tests for the screen UI: rendering, touch hit-testing, backend selection."""
+"""Tests for the screen UI: rendering, framebuffer packing, backend selection."""
 import chess
 
 from chessnood.boards.base import ConnectionState
@@ -6,16 +6,13 @@ from chessnood.config import DisplayConfig
 from chessnood.display import (
     SCREEN_H,
     SCREEN_W,
-    BUTTON_RECT,
     ConsoleDisplay,
     Display,
     PreviewDisplay,
     UiModel,
-    _find_touch,
     _pack,
     _probe_framebuffer,
     make_display,
-    point_in_button,
     render,
 )
 
@@ -33,12 +30,6 @@ def test_render_with_highlight_and_no_board():
                    chess.Board(), [chess.G1, chess.F3]))
 
 
-def test_point_in_button():
-    x0, y0, x1, y1 = BUTTON_RECT
-    assert point_in_button((x0 + x1) // 2, (y0 + y1) // 2)
-    assert not point_in_button(5, 5)
-
-
 def test_make_display_backends(tmp_path):
     assert type(make_display(DisplayConfig(backend="none"))) is Display
     assert isinstance(make_display(DisplayConfig(backend="console")), ConsoleDisplay)
@@ -53,14 +44,6 @@ def test_preview_display_writes_png(tmp_path):
     disp = PreviewDisplay(str(out))
     disp.update(UiModel(ConnectionState.CONNECTED, "Du bist am Zug", "", chess.Board()))
     assert out.exists() and out.stat().st_size > 0
-
-
-def test_new_game_handler_fires():
-    fired = []
-    disp = ConsoleDisplay()
-    disp.on_new_game(lambda: fired.append(True))
-    disp._fire_new_game()
-    assert fired == [True]
 
 
 def test_pack_rgb565_little_endian():
@@ -80,20 +63,3 @@ def test_pack_32bpp_is_rgbx():
 def test_probe_framebuffer_falls_back_when_missing(tmp_path):
     size, bpp = _probe_framebuffer(str(tmp_path / "fbnope"))
     assert size == (SCREEN_W, SCREEN_H) and bpp == 16
-
-
-class _FakeTouch:
-    def __init__(self, name):
-        self.name = name
-
-
-def test_find_touch_matches_by_name():
-    devs = {"/dev/input/event0": "some-keyboard",
-            "/dev/input/event1": "ADS7846 Touchscreen"}
-    path = _find_touch(lambda: list(devs), lambda p: _FakeTouch(devs[p]))
-    assert path == "/dev/input/event1"
-
-
-def test_find_touch_none_when_no_match():
-    devs = {"/dev/input/event0": "Logitech Mouse"}
-    assert _find_touch(lambda: list(devs), lambda p: _FakeTouch(devs[p])) is None

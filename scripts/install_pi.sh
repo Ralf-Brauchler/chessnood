@@ -4,7 +4,7 @@ set -euo pipefail
 
 echo ">> Installing system packages..."
 sudo apt-get update
-# python3-dev + build-essential: build the 'hidapi'/'evdev' wheels (in .[pi])
+# python3-dev + build-essential: build the 'hidapi' wheel (in .[pi])
 # libhidapi-hidraw0: runtime lib for USB-HID; fonts-dejavu-core: screen umlauts
 sudo apt-get install -y python3-venv python3-pip python3-dev build-essential \
     libhidapi-hidraw0 libhidapi-dev fonts-dejavu-core stockfish
@@ -12,7 +12,7 @@ sudo apt-get install -y python3-venv python3-pip python3-dev build-essential \
 echo ">> Creating virtualenv and installing chessnood..."
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install -e '.[pi]'   # includes hidapi (USB board), Pillow, evdev
+.venv/bin/pip install -e '.[pi]'   # includes hidapi (USB board) + Pillow (screen)
 
 echo ">> Installing config (edit config.yaml afterwards)..."
 [ -f config.yaml ] || cp config.example.yaml config.yaml
