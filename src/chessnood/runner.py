@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 
 import chess
@@ -32,12 +33,25 @@ log = logging.getLogger(__name__)
 # process start-up / UCI round-trips). Past it we treat the engine as wedged.
 ENGINE_HARD_TIMEOUT_MARGIN_S = 5.0
 
+# Capture signal: flash the cross this long, then a brief dark gap, then light the
+# destination -- so the captured-piece LED reads as a distinct new "on".
+CAPTURE_CROSS_S = 2.0
+CAPTURE_CROSS_OFF_S = 0.4
+
 
 def _board_from_pieces(pieces: dict) -> chess.Board:
     """A board carrying just the sensed piece placement, for rendering."""
     board = chess.Board()
     board.set_piece_map(dict(pieces))
     return board
+
+
+def _cross_squares(square: int) -> list[int]:
+    """The full rank and file through ``square`` -- a '+' cross of lit LEDs used as
+    the capture signal, centred on the square where the capture happens."""
+    f, r = chess.square_file(square), chess.square_rank(square)
+    return sorted({chess.square(f, rr) for rr in range(8)}
+                  | {chess.square(ff, r) for ff in range(8)})
 
 
 class Runner:
@@ -64,6 +78,13 @@ class Runner:
         # compute_guidance so that after a wrong piece is lifted we light the one
         # square it belongs on -- one whole piece at a time. None when not fixing.
         self._fixing: tuple[int, int] | None = None
+        # Capture signal: when the computer's move is a capture, briefly flash a
+        # cross through the target square as the capturing piece is lifted -- a
+        # clear "a piece is being taken here" cue before the destination lights.
+        self._capture_signal = cfg.board.capture_signal
+        self._cross_until = 0.0                     # board shows the cross until this time
+        self._crossed_move: chess.Move | None = None  # capture already flashed for
+        self._cross_square: int | None = None
         self._game_file = Path(cfg.game_state_file) if cfg.game_state_file else None
         self._load_game()
 
@@ -216,10 +237,50 @@ class Runner:
     async def _apply_guidance(self, *, beep: bool) -> None:
         """Recompute guidance for the sensed position and drive LEDs + screen."""
         self._recompute_guidance()
-        await self._board.set_leds(self._ui.highlight)
+        cross = self._capture_cross()          # capture signal overrides the LEDs briefly
+        await self._board.set_leds(cross if cross is not None else self._ui.highlight)
         if beep:
             await self._beep_on_transition()
         self._refresh_screen()
+
+    def _capture_cross(self) -> list[int] | None:
+        """When the computer's move is a capture, flash a cross through the target
+        square as the capturing piece is lifted. Returns the cross squares while
+        it's showing, else None (normal guidance). Display-only: the game logic is
+        untouched. A timer (`_cross_timer`) ends the flash and lights the
+        destination, because the board streams only on change -- while the player
+        holds the lifted piece no reading would arrive to end it."""
+        if not self._capture_signal:
+            return None
+        if time.monotonic() < self._cross_until:            # still flashing
+            return _cross_squares(self._cross_square)
+        move = self._game.pending_engine_move
+        if (self._game.state == GameState.ENGINE_MOVE_SHOWN and move is not None
+                and move is not self._crossed_move
+                and self._game.board.is_capture(move)
+                and not self._game.board.is_en_passant(move)
+                and move.from_square not in self._sensed.piece_map()):  # piece lifted
+            self._crossed_move = move          # flash once per move
+            self._cross_square = move.to_square
+            self._cross_until = time.monotonic() + CAPTURE_CROSS_S
+            asyncio.create_task(self._cross_timer(move))
+            return _cross_squares(move.to_square)
+        return None
+
+    async def _cross_timer(self, move: chess.Move) -> None:
+        """Hold the capture cross, then a brief dark gap, then hand back to normal
+        guidance (the destination LED) -- even if no board reading arrives."""
+        try:
+            await asyncio.sleep(CAPTURE_CROSS_S)
+            if self._game.pending_engine_move is not move or self._crossed_move is not move:
+                return                          # move completed/changed -> leave it
+            await self._board.set_leds([])      # "wieder aus": a distinct dark gap
+            await asyncio.sleep(CAPTURE_CROSS_OFF_S)
+            self._cross_until = 0.0             # end the flash window
+            if self._game.pending_engine_move is move:
+                await self._apply_guidance(beep=False)   # -> the destination LED
+        except asyncio.CancelledError:
+            pass
 
     async def _beep_on_transition(self) -> None:
         """A short tone only when something newly needs the player's attention."""

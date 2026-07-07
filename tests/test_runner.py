@@ -162,6 +162,59 @@ def test_engine_move_discarded_if_game_restarted_while_thinking(tmp_path):
     assert r._game.pending_engine_move is None          # the stale move was dropped
 
 
+def test_cross_squares_is_rank_plus_file():
+    from chessnood.runner import _cross_squares
+    sq = _cross_squares(chess.D5)
+    assert len(sq) == 15                                    # 8 on the file + 8 on the rank - 1 shared
+    assert chess.D5 in sq
+    assert all(s in sq for s in (chess.D1, chess.D8, chess.A5, chess.H5))
+    assert chess.E4 not in sq                               # off the cross
+
+
+def test_capture_flashes_cross_when_piece_lifted(tmp_path):
+    """A computer capture flashes the cross through the target once the capturing
+    piece is lifted -- not while it's still down, not for a non-capture, not off."""
+    fen = "4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1"              # white Pe4, black pd5
+    lifted = chess.Board(fen); pm = lifted.piece_map(); del pm[chess.E4]; lifted.set_piece_map(pm)
+
+    async def run():
+        from chessnood.runner import _cross_squares
+        r = _runner(tmp_path)
+        r._game.board = chess.Board(fen)
+        r._game.state = GameState.ENGINE_MOVE_SHOWN
+        r._game.pending_engine_move = chess.Move.from_uci("e4d5")   # a capture
+
+        r._sensed = chess.Board(fen)                        # capturing piece still down
+        assert r._capture_cross() is None
+        r._sensed = _pieces(lifted)                         # piece lifted -> flash
+        assert r._capture_cross() == _cross_squares(chess.D5)
+        assert r._capture_cross() == _cross_squares(chess.D5)   # persists within the window
+
+        for t in asyncio.all_tasks() - {asyncio.current_task()}:
+            t.cancel()                                      # clean up spawned _cross_timer(s)
+    asyncio.run(run())
+
+
+def test_no_cross_for_non_capture_or_when_disabled(tmp_path):
+    async def run():
+        r = _runner(tmp_path)
+        r._game.state = GameState.ENGINE_MOVE_SHOWN
+        r._game.board = chess.Board()
+        r._game.pending_engine_move = chess.Move.from_uci("e2e4")   # not a capture
+        lifted = chess.Board(); pm = lifted.piece_map(); del pm[chess.E2]; lifted.set_piece_map(pm)
+        r._sensed = _pieces(lifted)
+        assert r._capture_cross() is None                   # non-capture -> no cross
+
+        # a capture, but the signal is switched off
+        r._game.board = chess.Board("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1")
+        r._game.pending_engine_move = chess.Move.from_uci("e4d5")
+        cap_lifted = chess.Board("4k3/8/8/3p4/8/8/8/4K3 w - - 0 1")   # e4 empty
+        r._sensed = _pieces(cap_lifted)
+        r._capture_signal = False
+        assert r._capture_cross() is None
+    asyncio.run(run())
+
+
 def test_save_game_writes_a_restorable_file(tmp_path):
     r = _runner(tmp_path)
     r._game.board.push_uci("e2e4")
