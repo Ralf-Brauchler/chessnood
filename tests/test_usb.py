@@ -183,6 +183,46 @@ def test_failed_led_write_invalidates_dedup_cache():
     assert board._last_led_payload is None                 # cache dropped -> will resend
 
 
+# --- silent re-arm when the board sleeps -----------------------------------
+
+class _FakeDev:
+    """A hid handle stand-in that records close()."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_rearm_stream_swaps_handle_rearms_realtime_and_keeps_leds():
+    board = usb.UsbBoard()
+    old, new = _FakeDev(), _FakeDev()
+    board._dev = old
+    board._open_device = lambda: new              # a fresh handle
+    writes = []
+    board._write = lambda payload: writes.append(payload)
+    board._last_led_payload = usb.encode_leds([chess.E2])   # a move is currently lit
+
+    board._rearm_stream()
+
+    assert board._dev is new and old.closed        # swapped to the fresh handle
+    assert writes[0] == usb.CMD_REALTIME           # stream re-armed
+    assert writes[1] == usb.encode_leds([chess.E2])  # lit move restored on the new handle
+    assert board._last_led_payload == usb.encode_leds([chess.E2])  # dedup cache kept
+
+
+def test_rearm_stream_raises_when_board_is_gone():
+    # If the board really fell off the bus, re-arm can't open it and must raise so
+    # the caller falls back to a full reconnect (which surfaces DISCONNECTED).
+    board = usb.UsbBoard()
+    board._dev = _FakeDev()
+    board._open_device = _raise_no_board
+    import pytest
+    with pytest.raises(RuntimeError):
+        board._rearm_stream()
+
+
 # --- self-restart on an unrecoverable disconnect ---------------------------
 
 def _raise_no_board():

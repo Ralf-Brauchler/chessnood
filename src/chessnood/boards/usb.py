@@ -135,11 +135,12 @@ class UsbBoard(Board):
         self._last_led_payload: bytes | None = None
         self._connected_once = False  # have we ever opened the board in this process?
         self._link_up = False         # did the current _connect_once reach CONNECTED?
-        # If > 0, force a reconnect after this many seconds without a board report
-        # (catches a board whose firmware/USB wedged but stays enumerated, so the
-        # app would otherwise sit on a dead "connected" link forever). Off by
-        # default until we confirm the Pro streams reports continuously in
-        # realtime mode -- otherwise a long think would falsely trip it.  # VERIFY
+        # If > 0, silently re-arm the realtime stream after this many seconds with
+        # no board report. The Pro stops streaming when it sleeps (a long idle or
+        # think) and does NOT resume on the old handle even once touched, so we
+        # reopen + re-send realtime in place -- keeping the link "connected" (no
+        # screen flicker) so the board resumes the instant it's touched. 0 = off
+        # (a slept board then stays dead until the process restarts).
         self._stale_timeout_s = stale_timeout_s
 
     async def connect(self) -> None:
@@ -210,15 +211,52 @@ class UsbBoard(Board):
                 self._post_state(ConnectionState.DISCONNECTED)
                 time.sleep(RECONNECT_DELAY_S)
 
-    def _connect_once(self) -> None:
-        hid = _hidapi()
+    def _open_device(self):
+        """Find and open the board, returning a fresh blocking hid handle.
 
+        Raises RuntimeError if no board is enumerated. Does NOT arm the realtime
+        stream -- callers send CMD_REALTIME after the handle is in place.
+        """
+        hid = _hidapi()
         path = _find_device(hid)
         if path is None:
             raise RuntimeError("no Chessnut USB board found")
         dev = hid.device()
         dev.open_path(path)
         dev.set_nonblocking(False)
+        return dev
+
+    def _rearm_stream(self) -> None:
+        """Re-establish the realtime stream in place after the board went quiet.
+
+        The Pro sleeps when left idle (a senior may pause a long time over a
+        move); its realtime stream then stops and does NOT resume on the old
+        handle even once the board is touched again -- only a fresh open + a new
+        realtime command revives it (proven live: a process restart revives it,
+        sitting on the old handle does not). We do that here WITHOUT dropping the
+        link to DISCONNECTED, so the screen stays calm through a long think
+        instead of flickering "Verbindung verloren", and a freshly-armed session
+        is always waiting so the board resumes the instant it's touched. A real
+        hard failure (board off the bus) raises -> the caller does a full
+        reconnect (which does surface DISCONNECTED).
+        """
+        dev = self._open_device()          # raises if the board is really gone
+        with self._lock:
+            old, self._dev = self._dev, dev
+        if old is not None:
+            try:
+                old.close()
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+        self._write(CMD_REALTIME)
+        # Keep any lit move lit on the fresh handle (a new handle starts LEDs
+        # off); keep the dedup cache so the periodic refresh keeps re-sending it.
+        led = self._last_led_payload
+        if led and led != _LED_OFF:
+            self._write(led)
+
+    def _connect_once(self) -> None:
+        dev = self._open_device()
         with self._lock:
             self._dev = dev
         # A fresh link: the board's LEDs are off and the dedup cache is stale, so
@@ -247,9 +285,21 @@ class UsbBoard(Board):
                     return
                 data = self._dev.read(256, 100)  # 100 ms timeout
             if not data:
-                if self._stale_timeout_s and time.monotonic() - last_rx > self._stale_timeout_s:
-                    log.warning("No board report for %.0fs; reconnecting", self._stale_timeout_s)
-                    return  # _maintain reconnects
+                now = time.monotonic()
+                if self._stale_timeout_s and now - last_rx > self._stale_timeout_s:
+                    # The board went quiet -- it sleeps when idle. Silently re-arm
+                    # the realtime stream (fresh handle + realtime) WITHOUT dropping
+                    # to DISCONNECTED, so a long think doesn't flicker the screen.
+                    # If the board truly fell off the bus this raises -> a normal
+                    # reconnect (which does surface DISCONNECTED).
+                    log.debug("Board quiet for %.0fs; re-arming the realtime stream",
+                              self._stale_timeout_s)
+                    try:
+                        self._rearm_stream()
+                    except Exception as exc:  # noqa: BLE001 - board really gone
+                        log.warning("Re-arm failed (%s); reconnecting", exc)
+                        return  # _maintain does a full reconnect
+                    last_rx = now
                 continue
             last_rx = time.monotonic()
             if data[0] == REPORT_BOARD and len(data) >= BOARD_DATA_OFFSET + BOARD_DATA_LEN:

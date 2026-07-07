@@ -19,9 +19,11 @@ board:
                          # target square as the piece is lifted, then the target LED
   accept_wrong_after_s: 300  # if a wrong position sits uncorrected this long, adopt
                              # it and let the player carry on (0 = never; keep guiding)
-  stale_timeout_s: 0     # 0 = off. >0: reconnect if no board report arrives for this
-                         # long (recovers a wedged-but-still-plugged board). Enable
-                         # only once confirmed the board streams continuously.
+  stale_timeout_s: 20    # 0 = off. >0: if no board report arrives for this long, silently
+                         # re-arm the realtime stream (fresh open + realtime) WITHOUT dropping
+                         # the connection. The Pro stops streaming when it sleeps (a long
+                         # idle/think) and won't resume on the old handle; this revives it so a
+                         # move after a long pause still registers, with no screen flicker.
 
 game:
   human_color: white     # which colour your father plays: white | black

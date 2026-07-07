@@ -50,7 +50,8 @@ class BoardConfig:
     beeps: bool = True     # short tones on the board for "your turn" / wrong move / game over
     capture_signal: bool = True  # flash a cross through the target when the computer captures
     accept_wrong_after_s: int = 300  # adopt an uncorrected wrong position after this long (0 = never)
-    stale_timeout_s: float = 0.0  # >0: reconnect if no board report for this long (0 = off)  # VERIFY
+    stale_timeout_s: float = 20.0  # >0: silently re-arm the realtime stream if the board goes
+                                   # quiet this long (the Pro sleeps when idle); link stays up. 0 = off
 
 
 @dataclass
