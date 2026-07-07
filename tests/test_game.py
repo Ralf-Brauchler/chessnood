@@ -259,7 +259,8 @@ def test_slide_over_intermediate_is_not_committed(tmp_path):
 
     cfg = tmp_path / "c.yaml"
     cfg.write_text(f"board:\n  backend: mock\n  settle_ms: 80\ndisplay:\n  backend: none\n"
-                   f"game_state_file: {tmp_path / 'game.json'}\n")
+                   f"game_state_file: {tmp_path / 'game.json'}\n"
+                   f"status_file: {tmp_path / 'status.json'}\n")
 
     async def _run():
         board = MockBoard()
@@ -312,7 +313,8 @@ def test_runner_resumes_saved_game(tmp_path):
     }))
     cfg = tmp_path / "c.yaml"
     cfg.write_text(f"board:\n  backend: mock\ndisplay:\n  backend: none\n"
-                   f"game_state_file: {state_file}\n")
+                   f"game_state_file: {state_file}\n"
+                   f"status_file: {tmp_path / 'status.json'}\n")
     runner = Runner(MockBoard(), ConfigWatcher(str(cfg)))
     assert runner._game.board.fen() == b.fen()
     assert runner._game.state == GameState.PLAYER_TURN

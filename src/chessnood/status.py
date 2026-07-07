@@ -17,6 +17,12 @@ class StatusFile:
             "state": "starting",
             "skill_level": None,
             "last_move": None,
+            # A snapshot of what the screen currently shows, so a remote view (SSH
+            # `chessnood status` or the web page) can reproduce it without the board.
+            "status": None,        # short headline, e.g. "Du bist am Zug"
+            "instruction": None,   # one-line plain-language guidance
+            "fen": None,           # the position the screen is showing
+            "highlight": [],       # squares the board LEDs are lighting (names, e.g. "g1")
             "updated": None,
         }
 

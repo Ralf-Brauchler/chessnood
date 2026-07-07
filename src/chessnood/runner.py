@@ -93,8 +93,8 @@ class Runner:
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
-        self._status.update(state="starting", skill_level=self._watcher.current.engine.skill_level)
         self._recompute_guidance()
+        self._publish_status(state="starting", skill_level=self._watcher.current.engine.skill_level)
         self._refresh_screen()
         readings = self._board.subscribe_readings()
         states = self._board.subscribe_state()
@@ -141,28 +141,49 @@ class Runner:
             pass
 
     # --- screen -----------------------------------------------------------
-    def _refresh_screen(self) -> None:
+    def _current_model(self) -> UiModel:
+        """The single UiModel that both the screen and the status snapshot use."""
         if self._connection != ConnectionState.CONNECTED:
             status = {
                 ConnectionState.SCANNING: "Suche das Brett …",
                 ConnectionState.ERROR: "Verbindung verloren",
             }.get(self._connection, "Nicht verbunden")
-            self._display.update(UiModel(self._connection, status,
-                                         "Schalte das Brett ein und warte kurz.", self._sensed))
-            return
+            return UiModel(self._connection, status,
+                           "Schalte das Brett ein und warte kurz.", self._sensed)
         # show the guidance's target position if it has one (e.g. "set it up like
         # this"), otherwise the live physically sensed board
         board = self._ui.target if self._ui.target is not None else self._sensed
-        self._display.update(UiModel(self._connection, self._ui.status,
-                                     self._ui.instruction, board, self._ui.highlight))
+        return UiModel(self._connection, self._ui.status,
+                       self._ui.instruction, board, self._ui.highlight)
+
+    def _refresh_screen(self) -> None:
+        self._display.update(self._current_model())
+
+    def _publish_status(self, **extra) -> None:
+        """Write the status file: the current screen snapshot plus any extra fields.
+
+        Called only where the status file is already written (transitions, move
+        commits) -- never per board reading -- so the SD card isn't hammered. The
+        screen snapshot lets a remote viewer reproduce exactly what's displayed.
+        """
+        model = self._current_model()
+        fields = {
+            "connection": model.connection.value,
+            "status": model.status,
+            "instruction": model.instruction,
+            "fen": model.board.fen() if model.board is not None else None,
+            "highlight": [chess.square_name(s) for s in model.highlight],
+        }
+        fields.update(extra)
+        self._status.update(**fields)
 
     async def _handle_states(self, states: "asyncio.Queue[ConnectionState]") -> None:
         while True:
             state = await states.get()
             self._connection = state
-            self._status.update(connection=state.value)
             if state == ConnectionState.CONNECTED:
                 self._recompute_guidance()
+            self._publish_status()
             self._refresh_screen()
 
     async def _handle_readings(self, readings: "asyncio.Queue") -> None:
@@ -203,13 +224,14 @@ class Runner:
         """Carry out a game Reaction: recompute guidance, drive LEDs/screen, run engine."""
         if reaction.message:
             log.info("%s", reaction.message)
-            self._status.update(state=self._game.state.name, last_move=reaction.message)
         if reaction.invalid:
             log.debug("Board reading does not match a legal move (transient)")
 
         # Work out what to show/say and which squares to light, then apply it to
         # the board LEDs (primary move indicator) and the screen together.
         await self._apply_guidance(beep=True)
+        if reaction.message:
+            self._publish_status(state=self._game.state.name, last_move=reaction.message)
         self._save_game()
         self._arm_accept_timer()
 
@@ -317,7 +339,7 @@ class Runner:
         if changed:
             log.info("Config reloaded; skill_level=%s", cfg.engine.skill_level)
             self._engine.configure(cfg.engine)
-            self._status.update(skill_level=cfg.engine.skill_level)
+            self._publish_status(skill_level=cfg.engine.skill_level)
 
         # Think on a COPY so a concurrent restart (board.reset in feed) can't race
         # the engine thread. Cap the wall-clock so a wedged engine never freezes

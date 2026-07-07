@@ -69,6 +69,20 @@ class DisplayConfig:
 
 
 @dataclass
+class WebConfig:
+    """The optional read-only web status page (``chessnood web``).
+
+    A separate process/service that only reads the status file, so it can never
+    destabilise the game. Intended for a private network (e.g. Tailscale); it has
+    no authentication, so do not expose it to the open internet.
+    """
+
+    host: str = "0.0.0.0"   # bind address; 0.0.0.0 = all interfaces (fine behind Tailscale/LAN)
+    port: int = 8080
+    refresh_s: float = 3.0  # how often the page re-polls the status/screen
+
+
+@dataclass
 class GameConfig:
     human_color: str = "white"  # "white" | "black"
 
@@ -83,6 +97,7 @@ class Config:
     board: BoardConfig = field(default_factory=BoardConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     game: GameConfig = field(default_factory=GameConfig)
+    web: WebConfig = field(default_factory=WebConfig)
     log_level: str = "info"
     status_file: str = "./chessnood-status.json"
     game_state_file: str = "./chessnood-game.json"  # saved so a power blip resumes mid-game
@@ -95,6 +110,7 @@ class Config:
             board=BoardConfig(**_known(BoardConfig, data.get("board"))),
             display=DisplayConfig(**_known(DisplayConfig, data.get("display"))),
             game=GameConfig(**_known(GameConfig, data.get("game"))),
+            web=WebConfig(**_known(WebConfig, data.get("web"))),
             log_level=data.get("log_level", "info"),
             status_file=data.get("status_file", "./chessnood-status.json"),
             game_state_file=data.get("game_state_file", "./chessnood-game.json"),

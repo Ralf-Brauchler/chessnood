@@ -3,7 +3,8 @@
   chessnood run        run the service against the real board (or mock)
   chessnood simulate   play a full game with no hardware (proves the logic)
   chessnood scan       list attached Chessnut USB boards (first hardware test)
-  chessnood status     print what a running service is doing
+  chessnood status     print what the service, board and Pi are doing (SSH view)
+  chessnood web        serve a read-only web page of the same (for remote viewing)
   chessnood preview    render the touchscreen to a PNG to see how it looks
 
 Hardware bring-up (one layer at a time, see docs/HARDWARE.md):
@@ -275,15 +276,100 @@ def cmd_preview(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    s = int(seconds)
+    d, h, m = s // 86400, s % 86400 // 3600, s % 3600 // 60
+    return (f"{d}d " if d else "") + (f"{h}h " if h or d else "") + f"{m}m"
+
+
+def _status_board(data: dict, cfg: Config) -> "chess.Board | None":
+    """The board the screen is showing: prefer the status FEN, fall back to the
+    saved game file (older status files predate the embedded FEN)."""
+    import json
+    fen = data.get("fen")
+    if not fen and cfg.game_state_file:
+        try:
+            fen = json.loads(open(cfg.game_state_file, encoding="utf-8").read()).get("fen")
+        except (OSError, ValueError):
+            fen = None
+    if not fen:
+        return None
+    try:
+        return chess.Board(fen)
+    except ValueError:
+        return None
+
+
+def _print_health() -> None:
+    from . import health
+    h = health.gather()
+    print("Pi:")
+    svc = h.get("service") or {}
+    print(f"  {'host':13s}: {h.get('hostname')}")
+    print(f"  {'service':13s}: {svc.get('active')}"
+          + (f" (seit {svc.get('since')})" if svc.get("since") else ""))
+    temp = h.get("cpu_temp_c")
+    print(f"  {'cpu temp':13s}: {f'{temp} °C' if temp is not None else '-'}")
+    thr = h.get("throttled")
+    if thr is None:
+        power = "-"
+    elif thr["ok"]:
+        power = "ok"
+    elif thr["under_voltage_now"]:
+        power = f"UNDERVOLTAGE NOW ({thr['raw']})"
+    else:
+        power = f"throttling occurred ({thr['raw']})"
+    print(f"  {'power':13s}: {power}")
+    mem = h.get("memory")
+    print(f"  {'memory':13s}: " + (f"{mem['used_pct']}% of {mem['total_mb']} MB" if mem else "-"))
+    disk = h.get("disk")
+    print(f"  {'disk':13s}: " + (f"{disk['used_pct']}% of {disk['total_gb']} GB" if disk else "-"))
+    load = h.get("load")
+    print(f"  {'load':13s}: " + ("  ".join(str(x) for x in load) if load else "-"))
+    print(f"  {'uptime':13s}: {_fmt_duration(h.get('uptime_s'))}")
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     cfg = Config.load(args.config)
     try:
         data = StatusFile.read(cfg.status_file)
     except FileNotFoundError:
         print(f"No status file at {cfg.status_file}. Is the service running?", file=sys.stderr)
+        print()
+        _print_health()      # still show the Pi's health even when the game is down
         return 1
-    for key in ("connection", "state", "skill_level", "last_move", "updated"):
-        print(f"  {key:11s}: {data.get(key)}")
+    print("Program:")
+    for key in ("connection", "state", "skill_level", "status", "instruction",
+                "last_move", "updated"):
+        print(f"  {key:13s}: {data.get(key)}")
+    board = _status_board(data, cfg)
+    if board is not None:
+        print("\nBoard (what the screen shows):")
+        for line in _ascii_board(board.piece_map()).splitlines():
+            print(f"  {line}")
+    print()
+    _print_health()
+    return 0
+
+
+def cmd_web(args: argparse.Namespace) -> int:
+    """Serve a read-only web page showing the screen + the Pi's health."""
+    cfg = Config.load(args.config)
+    setup_logging(cfg.log_level)
+    try:
+        from .web import serve
+    except ImportError:
+        print("Pillow not installed. Run:  pip install 'chessnood[display]'", file=sys.stderr)
+        return 1
+    host = args.host if args.host is not None else cfg.web.host
+    port = args.port if args.port is not None else cfg.web.port
+    print(f"chessnood web view on http://{host}:{port}/  (read-only; Ctrl-C to stop)")
+    try:
+        serve(cfg, host, port)
+    except KeyboardInterrupt:
+        print("\nStopping.")
     return 0
 
 
@@ -330,7 +416,12 @@ def main(argv: list[str] | None = None) -> int:
     p_prev.add_argument("--out", default="./chessnood-preview.png")
     p_prev.set_defaults(func=cmd_preview)
 
-    sub.add_parser("status", help="print running service status").set_defaults(func=cmd_status)
+    sub.add_parser("status", help="print service, board and Pi status").set_defaults(func=cmd_status)
+
+    p_web = sub.add_parser("web", help="serve a read-only web status page")
+    p_web.add_argument("--host", default=None, help="bind address (default from config, 0.0.0.0)")
+    p_web.add_argument("--port", type=int, default=None, help="port (default from config, 8080)")
+    p_web.set_defaults(func=cmd_web)
 
     args = parser.parse_args(argv)
     return args.func(args)

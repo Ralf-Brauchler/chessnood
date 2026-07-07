@@ -27,14 +27,28 @@ def test_status_missing_file_returns_error(tmp_path, capsys):
 
 
 def test_status_reads_existing_file(tmp_path, capsys):
+    import chess as _chess
+
     from chessnood.status import StatusFile
     sfile = tmp_path / "status.json"
-    StatusFile(sfile).update(connection="connected", state="PLAYER_TURN", skill_level=5)
+    StatusFile(sfile).update(connection="connected", state="PLAYER_TURN", skill_level=5,
+                             fen=_chess.Board().fen())
     cfg = _cfg(tmp_path, f"status_file: {sfile}\n")
     rc = cli.cmd_status(argparse.Namespace(config=cfg))
     assert rc == 0
     out = capsys.readouterr().out
     assert "connected" in out and "PLAYER_TURN" in out
+    assert "Board" in out and "R N B Q K B N R" in out   # board rendered from the FEN
+    assert "Pi:" in out and "cpu temp" in out             # Pi health section
+
+
+def test_status_missing_file_still_shows_pi_health(tmp_path, capsys):
+    cfg = _cfg(tmp_path, f"status_file: {tmp_path / 'absent.json'}\n")
+    rc = cli.cmd_status(argparse.Namespace(config=cfg))
+    assert rc == 1
+    out, err = capsys.readouterr()
+    assert "service running" in err.lower()
+    assert "Pi:" in out                                   # health still printed when game is down
 
 
 def test_preview_writes_png(tmp_path):

@@ -1,0 +1,20 @@
+[Unit]
+Description=chessnood read-only web status page
+# Independent of the game service: it only reads the status file (never writes),
+# so it can start/stop/restart without affecting a game in progress. If the game
+# service is down, the page just shows that.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# A plain long-running server (no watchdog): read-only, nothing to hang the game.
+# User/WorkingDirectory are filled in by install_pi.sh for the deploying account.
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/.venv/bin/chessnood -c __DIR__/config.yaml web
+Restart=always
+RestartSec=3
+# Logs go to the journal: view with `journalctl -fu chessnood-web`
+
+[Install]
+WantedBy=multi-user.target

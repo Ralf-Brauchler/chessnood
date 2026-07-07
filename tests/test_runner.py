@@ -23,7 +23,8 @@ class RecordingDisplay(Display):
 def _runner(tmp_path, extra=""):
     cfg = tmp_path / "c.yaml"
     cfg.write_text("board:\n  backend: mock\ndisplay:\n  backend: none\n"
-                   f"game_state_file: {tmp_path / 'g.json'}\n" + extra)
+                   f"game_state_file: {tmp_path / 'g.json'}\n"
+                   f"status_file: {tmp_path / 's.json'}\n" + extra)
     r = Runner(MockBoard(), ConfigWatcher(str(cfg)))
     r._display = RecordingDisplay()
     return r
@@ -57,7 +58,8 @@ def test_corrupt_save_file_does_not_crash_and_starts_fresh(tmp_path):
     state_file.write_text("")            # empty/garbage -> json error on restore
     cfg = tmp_path / "c.yaml"
     cfg.write_text("board:\n  backend: mock\ndisplay:\n  backend: none\n"
-                   f"game_state_file: {state_file}\n")
+                   f"game_state_file: {state_file}\n"
+                   f"status_file: {tmp_path / 's.json'}\n")
     r = Runner(MockBoard(), ConfigWatcher(str(cfg)))   # must not raise
     assert r._game.state == GameState.NEED_SETUP
     assert r._game.board.fen() == chess.Board().fen()
@@ -107,7 +109,8 @@ def test_engine_hang_times_out_and_plays_a_fallback(tmp_path, monkeypatch):
     cfg = tmp_path / "c.yaml"
     cfg.write_text("board:\n  backend: mock\n  settle_ms: 0\n"
                    "engine:\n  move_time_ms: 20\ndisplay:\n  backend: none\n"
-                   f"game_state_file: {tmp_path / 'g.json'}\n")
+                   f"game_state_file: {tmp_path / 'g.json'}\n"
+                   f"status_file: {tmp_path / 's.json'}\n")
     r = Runner(MockBoard(), ConfigWatcher(str(cfg)))
     r._display = RecordingDisplay()
     r._game.state = GameState.ENGINE_THINKING

@@ -85,6 +85,33 @@ sudo systemctl start chessnood
 journalctl -fu chessnood
 ```
 
+## Checking on it from afar
+
+The player never touches the Pi, so the maintainer watches it remotely — over
+SSH or a browser. Both show the same three things: the **program** (what state
+the game is in), the **board** (the position the screen is showing), and the
+**Pi** (temperature, power/undervoltage, disk, uptime).
+
+```
+chessnood status        # one-screen summary over SSH: program + board + Pi health
+```
+
+`install_pi.sh` also installs a **read-only web page** (`chessnood-web.service`,
+port 8080) that shows the very same screen image the player sees, plus the Pi's
+health, auto-refreshing:
+
+```
+http://<pi>:8080/       # e.g. http://chessnoot.local:8080/
+```
+
+It is a separate, read-only process — it only *reads* the status file the game
+writes, so it can never disturb a game in progress (if the game hangs, the page
+just shows a stale timestamp). There is **no login and no way to control the
+game from it**, so keep it on a private network. The easy way to reach it (and
+SSH) from anywhere without opening any router port is [Tailscale](https://tailscale.com/):
+install it on the Pi and your laptop/phone, and `chessnoot` is reachable from
+everywhere as if on the same LAN.
+
 ## Next step
 
 Run the [hardware verification checklist](docs/HARDWARE.md) once the board is

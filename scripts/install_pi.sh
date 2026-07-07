@@ -21,20 +21,24 @@ echo ">> Installing udev rule for USB board access..."
 sudo cp scripts/99-chessnut.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger
 
-echo ">> Installing systemd service (rendered for user '$(whoami)' at $PWD)..."
+echo ">> Installing systemd services (rendered for user '$(whoami)' at $PWD)..."
 # Fill in the deploying user and project dir, so it works regardless of username
-# (the Pi user here is not 'pi'). __USER__/__DIR__ are placeholders in the unit.
-sed -e "s|__USER__|$(whoami)|g" -e "s|__DIR__|$PWD|g" \
-    systemd/chessnood.service | sudo tee /etc/systemd/system/chessnood.service >/dev/null
+# (the Pi user here is not 'pi'). __USER__/__DIR__ are placeholders in the units.
+for unit in chessnood chessnood-web; do
+    sed -e "s|__USER__|$(whoami)|g" -e "s|__DIR__|$PWD|g" \
+        "systemd/$unit.service" | sudo tee "/etc/systemd/system/$unit.service" >/dev/null
+done
 sudo systemctl daemon-reload
 sudo systemctl enable chessnood.service
+sudo systemctl enable chessnood-web.service   # read-only status page on :8080
 
 echo
 echo ">> NOTE: set up the 3.5\" screen overlay separately -- see docs/SETUP_PI.md"
 echo "   (install the goodtft mhs35 overlay; set display.fb_device: /dev/fb0)."
 echo
 echo "Done. Useful commands:"
-echo "  sudo systemctl start chessnood     # start now"
+echo "  sudo systemctl start chessnood chessnood-web   # start now (game + web page)"
 echo "  journalctl -fu chessnood           # live logs"
-echo "  .venv/bin/chessnood status         # current state"
+echo "  .venv/bin/chessnood status         # service + board + Pi health over SSH"
+echo "  http://$(hostname).local:8080/     # read-only web view (screen + health)"
 echo "  .venv/bin/chessnood scan           # find the board"

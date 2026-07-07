@@ -21,7 +21,8 @@ class BeepBoard(MockBoard):
 def _runner(tmp_path, beeps=True):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(f"board:\n  backend: mock\n  beeps: {str(beeps).lower()}\n"
-                   f"display:\n  backend: none\ngame_state_file: {tmp_path / 'g.json'}\n")
+                   f"display:\n  backend: none\ngame_state_file: {tmp_path / 'g.json'}\n"
+                   f"status_file: {tmp_path / 's.json'}\n")
     return Runner(BeepBoard(), ConfigWatcher(str(cfg)))
 
 

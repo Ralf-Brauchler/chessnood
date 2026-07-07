@@ -33,5 +33,11 @@ display:                 # the 3.5" SPI TFT (MHS-3.5): read-only status panel (n
   rotate: 0              # 0 | 90 | 180 | 270 — screen orientation
   preview_path: ./chessnood-screen.png   # where the "preview" backend writes
 
+web:                     # optional read-only status page (`chessnood web` / chessnood-web.service)
+  host: 0.0.0.0          # bind address; 0.0.0.0 = all interfaces (fine behind Tailscale/home LAN)
+  port: 8080             # open http://<pi>:8080/ — shows the screen + Pi health, auto-refreshing
+  refresh_s: 3           # how often the page re-polls
+                         # NOTE: no login — keep it on a private network (Tailscale/LAN), not the open internet
+
 log_level: info          # debug | info | warning | error
-status_file: ./chessnood-status.json   # `chessnood status` reads this file
+status_file: ./chessnood-status.json   # `chessnood status` and the web page read this file
