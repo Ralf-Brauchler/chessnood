@@ -52,6 +52,8 @@ class BoardConfig:
     accept_wrong_after_s: int = 300  # adopt an uncorrected wrong position after this long (0 = never)
     stale_timeout_s: float = 20.0  # >0: silently re-arm the realtime stream if the board goes
                                    # quiet this long (the Pro sleeps when idle); link stays up. 0 = off
+    keepalive_s: float = 30.0      # >0: re-send the realtime request this often even while idle,
+                                   # so the board keeps hearing from us and doesn't sleep/hang. 0 = off
 
 
 @dataclass

@@ -46,6 +46,15 @@ WRITE_INTERVAL_S = 0.2                      # SDK enforces >=200ms between write
 # long think.  # VERIFY interval on hardware if the LEDs flicker.
 LED_REFRESH_S = 0.25
 
+# Keep-alive. The board sleeps (and, on the user's unit, then hangs unrecoverably)
+# after a long idle when the host goes quiet. An interactive client keeps it awake
+# with constant traffic (the official app talks over BLE, whose link keeps the
+# board active); our USB read loop otherwise sends *nothing* during a pause -- we
+# only read. So re-send the idempotent realtime request this often, so the board
+# keeps hearing from us and never drops into that sleep.  # VERIFY against the
+# board's sleep timer (seen ~30 min after the last move).
+KEEPALIVE_S = 30.0
+
 # Report framing (EasyLinkSDK read thread + toFen).
 REPORT_BOARD = 0x01    # readBuf[0] for a board-state report
 BOARD_DATA_OFFSET = 2  # readBuf[0]=type, readBuf[1]=len, data starts at 2
@@ -123,7 +132,7 @@ def _hidapi():
 
 
 class UsbBoard(Board):
-    def __init__(self, stale_timeout_s: float = 0.0) -> None:
+    def __init__(self, stale_timeout_s: float = 0.0, keepalive_s: float = KEEPALIVE_S) -> None:
         super().__init__()
         self._dev = None              # hid.device
         self._lock = threading.Lock()        # guards the device handle (held briefly)
@@ -142,6 +151,10 @@ class UsbBoard(Board):
         # screen flicker) so the board resumes the instant it's touched. 0 = off
         # (a slept board then stays dead until the process restarts).
         self._stale_timeout_s = stale_timeout_s
+        # If > 0, re-send the realtime request this often even while idle, so the
+        # board keeps hearing from us and doesn't drop into its (unrecoverable)
+        # sleep. 0 = off. See KEEPALIVE_S.
+        self._keepalive_s = keepalive_s
 
     async def connect(self) -> None:
         """Start the background read/reconnect loop and return immediately."""
@@ -270,8 +283,15 @@ class UsbBoard(Board):
 
         last_rx = time.monotonic()
         last_led_refresh = 0.0
+        last_keepalive = time.monotonic()
         last_pieces: dict[int, chess.Piece] | None = None
         while self._run:
+            # Keep-alive: re-send the (idempotent) realtime request periodically so
+            # the board keeps hearing from us during a long pause and doesn't drop
+            # into its unrecoverable sleep -- see KEEPALIVE_S.
+            if self._keepalive_s and time.monotonic() - last_keepalive >= self._keepalive_s:
+                self._write(CMD_REALTIME)
+                last_keepalive = time.monotonic()
             # Re-send the current LED pattern periodically: the board auto-clears
             # its LEDs, so a lit square would otherwise fade during a long think.
             # Skipped when nothing is lit (payload None/unknown or all-off).

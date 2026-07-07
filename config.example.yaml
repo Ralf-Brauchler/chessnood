@@ -24,6 +24,10 @@ board:
                          # the connection. The Pro stops streaming when it sleeps (a long
                          # idle/think) and won't resume on the old handle; this revives it so a
                          # move after a long pause still registers, with no screen flicker.
+  keepalive_s: 30        # 0 = off. >0: re-send the realtime request this often even while idle,
+                         # so the board keeps hearing from us and never drops into its sleep
+                         # (which, on this unit, hangs it unrecoverably). The official app avoids
+                         # this because it talks over Bluetooth, whose link keeps the board awake.
 
 game:
   human_color: white     # which colour your father plays: white | black
