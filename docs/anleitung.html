@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schachcomputer – Kurzanleitung</title>
+<style>
+  :root {
+    --paper:  #FBFAF7;
+    --card:   #FFFFFF;
+    --ink:    #1C2430;
+    --soft:   #5A6470;
+    --line:   #E6E1D8;
+    --amber:  #C8871A;   /* amber for text/badges on white */
+    --led:    #F2BF40;   /* the board's actual highlight colour */
+    --go:     #3E9B54;
+    --stop:   #B23A2E;
+    --sq-l:   #C9CDD4;
+    --sq-d:   #5C6370;
+    --shadow: 0 1px 2px rgba(28,36,48,.06), 0 6px 20px rgba(28,36,48,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14181D; --card: #1B2027; --ink: #ECEFF2; --soft: #9AA3AE;
+      --line: #2A313A; --amber: #F2BF40; --led: #F2BF40; --go: #5BC46F;
+      --stop: #E0685B; --sq-l: #AEB4BC; --sq-d: #5C6370;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #14181D; --card: #1B2027; --ink: #ECEFF2; --soft: #9AA3AE;
+    --line: #2A313A; --amber: #F2BF40; --led: #F2BF40; --go: #5BC46F;
+    --stop: #E0685B; --sq-l: #AEB4BC; --sq-d: #5C6370; --shadow: none;
+  }
+  :root[data-theme="light"] {
+    --paper: #FBFAF7; --card: #FFFFFF; --ink: #1C2430; --soft: #5A6470;
+    --line: #E6E1D8; --amber: #C8871A; --led: #F2BF40; --go: #3E9B54;
+    --stop: #B23A2E; --sq-l: #C9CDD4; --sq-d: #5C6370;
+    --shadow: 0 1px 2px rgba(28,36,48,.06), 0 6px 20px rgba(28,36,48,.05);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 17.5px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 40px 34px 30px;
+  }
+
+  h1, h2, .step-t { font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; }
+
+  /* ---- header ---- */
+  header { display: flex; align-items: center; gap: 18px; margin-bottom: 8px; }
+  .mark {
+    flex: none; width: 54px; height: 54px; border-radius: 10px;
+    background: var(--ink); display: grid; place-items: center;
+    box-shadow: var(--shadow);
+  }
+  .mark svg { display: block; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--amber); font-weight: 700; margin: 0 0 2px;
+  }
+  h1 { font-size: 32px; line-height: 1.05; margin: 0; text-wrap: balance; }
+  .lead {
+    color: var(--soft); margin: 12px 0 26px; max-width: 62ch;
+    font-size: 17px;
+  }
+  .lead b { color: var(--ink); font-weight: 600; }
+
+  /* ---- numbered play steps ---- */
+  .steps { display: flex; flex-direction: column; gap: 14px; margin-bottom: 26px; }
+  .step {
+    display: grid; grid-template-columns: 46px 1fr; gap: 16px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; box-shadow: var(--shadow);
+  }
+  .num {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--led); color: #3a2c05;
+    display: grid; place-items: center;
+    font-family: Georgia, serif; font-weight: 700; font-size: 22px;
+    font-variant-numeric: tabular-nums;
+  }
+  .step-t { font-size: 20px; font-weight: 600; margin: 2px 0 4px; }
+  .step p { margin: 0; color: var(--ink); }
+  .step p + p { margin-top: 6px; color: var(--soft); font-size: 16px; }
+
+  /* two lit squares glyph */
+  .lit { display: inline-flex; align-items: center; gap: 7px; vertical-align: -6px; margin: 0 3px; }
+  .lit .sq {
+    width: 24px; height: 24px; border-radius: 4px; background: var(--sq-l);
+    box-shadow: inset 0 0 0 3px var(--led);
+  }
+  .lit .arw { color: var(--soft); font-size: 18px; }
+
+  /* ---- reference cards ---- */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 15px 17px; box-shadow: var(--shadow);
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 {
+    font-size: 18px; margin: 0 0 7px; display: flex; align-items: center; gap: 9px;
+  }
+  .card h2 .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+  .card p { margin: 0; font-size: 16px; }
+  .card p + p { margin-top: 6px; }
+  .card .hint { color: var(--soft); }
+  .lrule { border-left: 4px solid var(--stop); }
+
+  /* strength strip */
+  .strip { display: flex; gap: 4px; margin: 10px 0 6px; }
+  .strip .c {
+    flex: 1; text-align: center; border-radius: 5px; padding: 6px 0 5px;
+    font-variant-numeric: tabular-nums; border: 1px solid var(--line);
+  }
+  .strip .c .f { font-size: 11px; color: var(--soft); text-transform: uppercase; }
+  .strip .c .n { font-size: 17px; font-weight: 700; }
+  .strip .c:nth-child(odd) { background: color-mix(in srgb, var(--sq-l) 30%, var(--card)); }
+  .scale-lbl { display: flex; justify-content: space-between; font-size: 13px; color: var(--soft); }
+  .king { font-size: 21px; line-height: 1; vertical-align: -2px; }
+  .king.w { color: var(--amber); }
+
+  /* ---- cheat sheet ---- */
+  .sheet-ref { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .ref h2 { font-size: 16px; margin: 0 0 8px; letter-spacing: .01em; }
+  .ref dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; }
+  .ref dt { font-weight: 600; white-space: nowrap; }
+  .ref dt.say { font-family: Georgia, serif; font-style: italic; font-weight: 600; color: var(--amber); }
+  .ref dd { margin: 0; color: var(--soft); font-size: 15px; }
+  .beep { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 2px; vertical-align: 0; }
+
+  footer {
+    margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+    color: var(--soft); font-size: 15px; flex-wrap: wrap;
+  }
+  footer b { color: var(--ink); }
+
+  @media (max-width: 620px) {
+    .cards, .sheet-ref { grid-template-columns: 1fr; }
+    .sheet { padding: 26px 18px; }
+    h1 { font-size: 27px; }
+  }
+
+  /* ---- print: one calm page on paper ---- */
+  @media print {
+    :root {
+      --paper:#fff; --card:#fff; --ink:#1C2430; --soft:#525b66; --line:#d9d4ca;
+      --amber:#B4780F; --led:#F2BF40; --go:#2f8547; --stop:#a5342a;
+      --sq-l:#C9CDD4; --sq-d:#5C6370; --shadow:none;
+    }
+    @page { margin: 12mm; }
+    body { font-size: 11.5pt; }
+    .sheet { padding: 0; max-width: none; }
+    .step, .card, .mark { box-shadow: none; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <div class="mark" aria-hidden="true">
+      <svg width="30" height="30" viewBox="0 0 30 30">
+        <rect x="0"  y="0"  width="7.5" height="7.5" fill="#C9CDD4"/>
+        <rect x="15" y="0"  width="7.5" height="7.5" fill="#C9CDD4"/>
+        <rect x="7.5" y="7.5" width="7.5" height="7.5" fill="#C9CDD4"/>
+        <rect x="22.5" y="7.5" width="7.5" height="7.5" fill="#C9CDD4"/>
+        <rect x="0"  y="15" width="7.5" height="7.5" fill="#C9CDD4"/>
+        <rect x="15" y="15" width="7.5" height="7.5" fill="#F2BF40"/>
+        <rect x="7.5" y="22.5" width="7.5" height="7.5" fill="#C9CDD4"/>
+        <rect x="22.5" y="22.5" width="7.5" height="7.5" fill="#C9CDD4"/>
+      </svg>
+    </div>
+    <div>
+      <p class="eyebrow">Schachcomputer</p>
+      <h1>Kurzanleitung zum Spielen</h1>
+    </div>
+  </header>
+
+  <p class="lead">
+    Du spielst wie immer mit echten Figuren auf dem Brett. <b>Das Brett zeigt die
+    Züge des Computers mit kleinen Lichtern</b>, und der Bildschirm sagt dir in
+    einfachen Worten, was gerade dran ist. Notation oder Technik brauchst du nicht.
+  </p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div>
+        <div class="step-t">Einschalten</div>
+        <p>Netzteil einstecken und kurz warten. Nach etwa einer Minute zeigt der
+        Bildschirm das Brett und <b>„Du bist am Zug"</b>. Der grüne Punkt oben rechts
+        bedeutet: Brett verbunden.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">2</div>
+      <div>
+        <div class="step-t">Dein Zug</div>
+        <p>Mach deinen Zug einfach auf dem Brett — Figur nehmen und aufs Zielfeld
+        stellen. Mehr ist nicht nötig.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">3</div>
+      <div>
+        <div class="step-t">Der Computer zieht</div>
+        <p>Er denkt kurz, dann <b>leuchten zwei Felder</b>
+          <span class="lit" aria-hidden="true"><span class="sq"></span><span class="arw">→</span><span class="sq"></span></span>:
+          Nimm die Figur vom einen leuchtenden Feld und stelle sie auf das andere.</p>
+        <p>Steht auf dem Zielfeld schon eine Figur, wird sie geschlagen — nimm sie vom
+        Brett. Beim Schlagen blinkt kurz ein Kreuz aus Lichtern. Das ist normal.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card lrule">
+      <h2><span class="dot" style="background:var(--stop)"></span>Wenn etwas nicht stimmt</h2>
+      <p>Steht eine Figur falsch, zeigt der Bildschirm <b>„Das passt nicht"</b> und es
+      piept kurz. Das <b>leuchtende Feld</b> zeigt dir, wohin die Figur gehört. Folge
+      einfach dem Licht — eine Figur nach der anderen.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot" style="background:var(--go)"></span>Neue Partie</h2>
+      <p>Stelle alle Figuren zurück in die <b>Grundstellung</b>. Eine neue Partie
+      beginnt von selbst — kein Knopf, kein Menü.</p>
+    </div>
+
+    <div class="card wide">
+      <h2><span class="king w">♔</span><span class="king">♚</span>&nbsp;Stärke und Farbe wählen</h2>
+      <p>In der <b>Grundstellung</b>: Nimm deinen <b>König</b> und stelle ihn auf ein
+      freies Feld in der Mitte. Die <b>Spalte</b> wählt die Spielstärke:</p>
+      <div class="strip" aria-hidden="true">
+        <div class="c"><div class="f">a</div><div class="n">1</div></div>
+        <div class="c"><div class="f">b</div><div class="n">2</div></div>
+        <div class="c"><div class="f">c</div><div class="n">3</div></div>
+        <div class="c"><div class="f">d</div><div class="n">4</div></div>
+        <div class="c"><div class="f">e</div><div class="n">5</div></div>
+        <div class="c"><div class="f">f</div><div class="n">6</div></div>
+        <div class="c"><div class="f">g</div><div class="n">7</div></div>
+        <div class="c"><div class="f">h</div><div class="n">8</div></div>
+      </div>
+      <div class="scale-lbl"><span>← leicht</span><span>schwer →</span></div>
+      <p style="margin-top:9px">Die <b>Farbe des Königs</b> wählt deine Seite:
+        <b><span class="king w">♔</span> weißer König</b> = du spielst Weiß (du beginnst),
+        <b><span class="king">♚</span> schwarzer König</b> = du spielst Schwarz (der Computer
+        beginnt). Der Bildschirm zeigt z. B. <i>„Stufe 3, du spielst Weiß"</i>.
+        Dann den König zurück auf sein Feld — und los geht's.</p>
+    </div>
+
+    <div class="card wide">
+      <h2>Ausschalten</h2>
+      <p>Einfach den Stecker ziehen — <b>kaputtmachen kannst du nichts</b>. Eine
+      laufende Partie wird gemerkt und ist beim nächsten Einschalten wieder da.</p>
+    </div>
+  </div>
+
+  <div class="sheet-ref">
+    <div class="ref card">
+      <h2>Die Töne</h2>
+      <dl>
+        <dt><span class="beep" style="background:var(--led)"></span>Hoher Piep</dt>
+        <dd>Der Computer hat gezogen — führe den leuchtenden Zug aus.</dd>
+        <dt><span class="beep" style="background:var(--stop)"></span>Tiefer Piep</dt>
+        <dd>Etwas stimmt nicht — schau auf das leuchtende Feld.</dd>
+        <dt><span class="beep" style="background:var(--soft)"></span>Langer Ton</dt>
+        <dd>Die Partie ist zu Ende.</dd>
+      </dl>
+    </div>
+
+    <div class="ref card">
+      <h2>Was der Bildschirm sagt</h2>
+      <dl>
+        <dt class="say">Du bist am Zug</dt><dd>Du bist dran.</dd>
+        <dt class="say">Computer denkt …</dt><dd>Kurz warten.</dd>
+        <dt class="say">Das passt nicht</dt><dd>Figur steht falsch — dem Licht folgen.</dd>
+        <dt class="say">Suche das Brett …</dt><dd>Brett/Strom prüfen, kurz warten.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <footer>
+    <span>Keine Sorge: Falsch machen kann man nichts. Im Zweifel alle Figuren in die
+      Grundstellung stellen — das startet eine neue Partie.</span>
+    <span>Bei Fragen einfach anrufen. — <b>Ralf</b></span>
+  </footer>
+</div>
+</body>
+</html>

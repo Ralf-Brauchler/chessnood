@@ -31,9 +31,14 @@ interaction is at the board:
    game begins automatically. (So "reset the board" *is* "new game"; there is no
    separate off/quit.)
 
-Strength, colour and other settings are fixed in `config.yaml` and only changed
-by the maintainer over SSH (live, no restart). Whether the player is White or
-Black is set there too — as Black, the computer moves first right after setup.
+Strength and colour can be set **from the board**: in the start position, lift a
+king onto an empty square — the file (a–h) picks the strength (level 1–8) and the
+king's colour picks the side you play; put the king back to start. They can also be
+changed in `config.yaml` over SSH (live, no restart). Other settings live in
+`config.yaml`.
+
+A one-page, printable player's guide (German) is at
+[docs/anleitung.html](docs/anleitung.html).
 
 ## Requirements
 
