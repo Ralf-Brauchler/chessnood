@@ -89,6 +89,7 @@ chessnood status                # quick snapshot (connection, state, skill)
 nano config.yaml                # change skill_level / move_time — applied next move, no restart
 chessnood scan                  # list attached Chessnut USB boards
 sudo systemctl restart chessnood
+systemctl list-timers chessnood-update   # when the next auto-update check runs
 ```
 
 ## 6. Adjusting strength
