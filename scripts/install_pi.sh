@@ -33,14 +33,13 @@ chmod +x scripts/chessnood-update.sh
 sudo systemctl daemon-reload
 sudo systemctl enable chessnood.service
 sudo systemctl enable chessnood-web.service     # read-only status page on :8080
-# Self-update only makes sense from a git checkout (not an rsync copy). Enable the
-# timer when this is one, so a Pi at a remote site keeps itself up to date.
-if git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
-    sudo systemctl enable chessnood-update.timer  # hourly-ish `git pull` + restart
-else
-    echo ">> NOTE: not a git checkout -- skipping the self-update timer."
-    echo "   For a remote site, deploy with 'git clone' so it can update itself."
-fi
+# Updates are done manually over Tailscale (see docs/SETUP_PI.md), so the auto-update
+# timer stays OFF: this is a single, un-fixable-in-person device with no hardware test
+# rig, where an unattended bad update is riskier than the convenience is worth. The
+# oneshot `chessnood-update.service` is still installed as a one-command "update now"
+# (`sudo systemctl start chessnood-update.service` = git pull + restart), just not
+# scheduled. To opt back into auto-updates: `sudo systemctl enable --now chessnood-update.timer`.
+echo ">> Auto-update timer left DISABLED (manual updates over Tailscale)."
 
 echo
 echo ">> NOTE: set up the 3.5\" screen overlay separately -- see docs/SETUP_PI.md"

@@ -110,45 +110,50 @@ unset to use this.)
 
 ## 7. A Pi at a remote site (e.g. a relative's house)
 
-Once the box lives on someone else's network you can't reach it by `.local` (mDNS
-is LAN-only) and their router NATs it away. Two complementary mechanisms cover this;
-set up **both**.
+This is a **single device that ships away** and can't be fixed in person, and there
+is no second board to try changes on. So updates are done **manually and observed
+over Tailscale** — never unattended, so a bad change can't silently brick it.
 
-**Deploy from a git checkout, not rsync.** So the Pi can update itself, install it
-with `git clone` rather than copying files:
+### Remote access (Tailscale) — the lifeline
 
-```
-git clone https://github.com/<you>/chessnood.git ~/chessnood
-cd ~/chessnood && ./scripts/install_pi.sh
-```
-
-### Hands-off updates (self-update timer)
-
-`install_pi.sh` installs `chessnood-update.timer`, which every ~30 min runs a
-`git pull` of the branch the Pi has checked out and restarts the services **only if
-it moved**. It talks *out* to GitHub, so it needs no VPN, no port forwarding, and
-nothing exposed. Which branch a Pi follows is just the branch it's on:
-
-- **Test Pi at home:** stay on `master`.
-- **Pi at the remote site:** put it on a `release` branch (`git checkout release`).
-- Promote a tested change with `git push origin master:release`; the remote Pi
-  picks it up on its next tick. Never push straight to `release` untested — a broken
-  commit lands unattended where nobody can fix it. `systemctl restart` keeps the
-  service alive, but a commit that crashes on start would loop.
-
-Check it: `systemctl list-timers chessnood-update` and `journalctl -u chessnood-update`.
-
-### Remote access (Tailscale)
-
-For SSH / the web view / `journalctl` from anywhere, put the Pi on a [Tailscale](https://tailscale.com)
-tailnet (free; punches through NAT, gives a stable name). On the Pi **and** your
-machine:
+Once the box lives on someone else's network you can't reach it by `.local` (mDNS is
+LAN-only) and their router NATs it away. Put the Pi **and your machine** on a
+[Tailscale](https://tailscale.com) tailnet (free; punches through NAT, stable name):
 
 ```
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up            # opens a login URL -- authenticate to your account
 ```
 
-Then reach it by its tailnet name from anywhere: `ssh <you>@chessnood-vater`,
-`http://chessnood-vater:8080/`. Keep the web view **inside** the tailnet (do not
-port-forward it: it has no authentication).
+`tailscaled` is enabled, so it reconnects on every boot with no re-login. Reach the
+Pi from anywhere by its tailnet name: `ssh ralf@chessnoot`, `http://chessnoot:8080/`.
+Keep the web view **inside** the tailnet (never port-forward it — it has no auth).
+
+### Updating (manual, observed)
+
+Deploy as a real `git clone` (not rsync) so updates are a `git pull`:
+
+```
+git clone https://github.com/<you>/chessnood.git ~/chessnood
+cd ~/chessnood && ./scripts/install_pi.sh     # leaves the auto-update timer OFF
+```
+
+Develop and software-test at home (`pytest`, `chessnood preview`, the mock board),
+push to GitHub, then update the Pi **while watching it**:
+
+```
+ssh ralf@chessnoot
+cd ~/chessnood && git pull && sudo systemctl restart chessnood chessnood-web
+journalctl -fu chessnood        # confirm it comes back up before you walk away
+```
+
+`sudo systemctl start chessnood-update.service` does the same `git pull` + restart in
+one shot (see `journalctl -u chessnood-update`). If an update misbehaves, roll back:
+
+```
+git -C ~/chessnood reset --hard HEAD@{1} && sudo systemctl restart chessnood chessnood-web
+```
+
+The auto-update timer stays disabled by design; enabling it would update the shipped
+device unattended, with no hardware test and no one to fix a bad build. Turn it on
+only if you accept that trade-off: `sudo systemctl enable --now chessnood-update.timer`.
