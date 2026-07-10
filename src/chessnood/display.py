@@ -181,11 +181,15 @@ def render(model: UiModel):
         draw.text((_PANEL_X, 228), model.detail, font=font, fill=_MUTED)
 
     # footer hint: a new game is started simply by resetting the pieces
-    # (no touch/button -- the resistive touch panel is unreliable on this board)
-    draw.line((12, 254, SCREEN_W - 12, 254), fill=(40, 46, 54), width=1)
+    # (no touch/button -- the resistive touch panel is unreliable on this board).
+    # Keep the divider clear of the board (which ends at board_bottom) so it never
+    # cuts through the bottom rank.
+    board_bottom = _BOARD_ORIGIN[1] + _BOARD_SIZE
+    divider_y = board_bottom + 6
+    draw.line((12, divider_y, SCREEN_W - 12, divider_y), fill=(40, 46, 54), width=1)
     hint = "Neue Partie: alle Figuren in die Grundstellung stellen"
-    _centred(draw, hint, _fit_font(draw, hint, SCREEN_W - 24, 20, 13), _MUTED,
-             (0, 260, SCREEN_W, 312))
+    _centred(draw, hint, _fit_font(draw, hint, SCREEN_W - 24, 18, 13), _MUTED,
+             (0, divider_y + 2, SCREEN_W, SCREEN_H))
     return img
 
 
