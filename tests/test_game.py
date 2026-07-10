@@ -53,14 +53,38 @@ def test_no_selection_once_a_move_has_been_played():
     board = chess.Board(); board.push_uci("e2e4")
     game.board = board
     # even a king-on-empty pattern must not be read as a selection mid-game
-    assert detect_strength_selection(board, _king_on(chess.C3), chess.WHITE) is None
+    assert detect_strength_selection(board, _king_on(chess.C3)) is None
 
 
 def test_no_selection_when_another_piece_also_moved():
     board = chess.Board()
     pieces = _king_on(chess.C3)
     pieces[chess.E5] = pieces.pop(chess.E2)           # also nudged a pawn
-    assert detect_strength_selection(board, pieces, chess.WHITE) is None
+    assert detect_strength_selection(board, pieces) is None
+
+
+def test_black_king_gesture_makes_human_play_black_and_engine_opens():
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))              # normally begins as White
+    # lift the BLACK king onto the c-file: play black at level 3
+    react = game.feed(BoardReading(_king_on(chess.C5, chess.BLACK)))
+    assert react.select_skill == 3
+    assert react.select_color == chess.BLACK
+    assert game.human_color == chess.BLACK
+    # king back home -> the computer (White) opens
+    react2 = game.feed(reading_of(chess.Board()))
+    assert react2.engine_should_move
+    assert game.state == GameState.ENGINE_THINKING
+
+
+def test_white_king_gesture_switches_side_back_to_white():
+    game = ChessGame(human_color=chess.BLACK)
+    react = game.feed(BoardReading(_king_on(chess.B3, chess.WHITE)))
+    assert react.select_skill == 2 and react.select_color == chess.WHITE
+    assert game.human_color == chess.WHITE
+    react2 = game.feed(reading_of(chess.Board()))    # king home -> human (White) to move
+    assert not react2.engine_should_move
+    assert game.state == GameState.PLAYER_TURN
 
 
 def test_detect_simple_move():

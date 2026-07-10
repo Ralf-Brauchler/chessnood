@@ -74,40 +74,45 @@ class Reaction:
     engine_should_move: bool = False
     message: str | None = None
     invalid: bool = False
-    # The player picked an engine strength via the board (see
-    # :func:`detect_strength_selection`); the runner persists it. ``None`` = no pick.
+    # The player picked settings via the board (see :func:`detect_strength_selection`);
+    # the runner persists the strength. ``None`` = nothing picked this reading.
     select_skill: int | None = None
+    select_color: chess.Color | None = None
 
 
-# Strength selection by gesture: from the start position, lifting the human's king
-# onto an empty square picks the engine strength by FILE -- a (left) = level 1 ..
-# h = level 8. Only the file (the "X axis") matters; the rank is ignored. Setting
-# the king back on its home square then starts the game at the chosen strength.
+# Settings by gesture: from the start position, lifting a king onto an empty square
+# is a settings gesture. The FILE picks the engine strength -- a (left) = level 1 ..
+# h = level 8 (only the file, the "X axis", matters; the rank is ignored). The COLOUR
+# of the lifted king picks the side the human plays -- white king -> human plays White
+# (computer answers as Black); black king -> human plays Black (computer opens as
+# White). Setting the king back on its home square then starts the game accordingly.
 def detect_strength_selection(
-    board: chess.Board, pieces: dict[int, chess.Piece], human_color: chess.Color
-) -> tuple[int, int] | None:
-    """If the game is still at the start position and the *only* difference is the
-    human's king lifted from its home square onto an otherwise-empty square, return
-    ``(skill_level, king_square)``; otherwise ``None``.
+    board: chess.Board, pieces: dict[int, chess.Piece]
+) -> tuple[int, int, chess.Color] | None:
+    """If the game is still at the start position and the *only* difference is a
+    single king lifted from its home square onto an otherwise-empty square, return
+    ``(skill_level, king_square, human_colour)``; otherwise ``None``.
 
-    ``skill_level`` is the king square's file mapped a..h -> 1..8. Requiring every
-    other square to still hold its start piece keeps this from firing during play.
+    ``skill_level`` is the king square's file mapped a..h -> 1..8; ``human_colour``
+    is the lifted king's colour. Requiring every other square to still hold its start
+    piece keeps this from ever firing during play.
     """
     start = chess.Board().piece_map()
     if board.piece_map() != start:
         return None                        # a move has been played -> not a selection
-    home = chess.E1 if human_color == chess.WHITE else chess.E8
-    king = chess.Piece(chess.KING, human_color)
-    king_squares = [sq for sq, piece in pieces.items() if piece == king]
-    if len(king_squares) != 1:
-        return None
-    ksq = king_squares[0]
-    if ksq == home or ksq in start:        # still home, or set on an occupied square
-        return None
-    expected = {sq: piece for sq, piece in start.items() if sq != home}
-    if {sq: piece for sq, piece in pieces.items() if sq != ksq} != expected:
-        return None                        # something else moved too -> not a selection
-    return chess.square_file(ksq) + 1, ksq
+    for color in (chess.WHITE, chess.BLACK):
+        home = chess.E1 if color == chess.WHITE else chess.E8
+        king = chess.Piece(chess.KING, color)
+        king_squares = [sq for sq, piece in pieces.items() if piece == king]
+        if len(king_squares) != 1:
+            continue
+        ksq = king_squares[0]
+        if ksq == home or ksq in start:    # still home, or set on an occupied square
+            continue
+        expected = {sq: piece for sq, piece in start.items() if sq != home}
+        if {sq: piece for sq, piece in pieces.items() if sq != ksq} == expected:
+            return chess.square_file(ksq) + 1, ksq, color
+    return None
 
 
 class ChessGame:
@@ -164,13 +169,22 @@ class ChessGame:
 
     # --- board input ------------------------------------------------------
     def feed(self, reading: BoardReading) -> Reaction:
-        # Strength selection: the human's king lifted onto an empty square from the
-        # start position is a settings gesture, not a move -- handle it before the
-        # move logic so it isn't misread as an illegal position.
-        picked = detect_strength_selection(self.board, reading.pieces, self.human_color)
+        # Settings gesture: a king lifted onto an empty square from the start position
+        # picks strength (file) and side (king colour), not a move -- handle it before
+        # the move logic so it isn't misread as an illegal position. The colour re-arms
+        # setup so putting the king back begins the game with the right side to move.
+        picked = detect_strength_selection(self.board, reading.pieces)
         if picked is not None:
-            skill, _ = picked
-            return Reaction(select_skill=skill, message=f"Strength selection: level {skill}")
+            skill, _ksq, color = picked
+            if color != self.human_color or self.state != GameState.NEED_SETUP:
+                self.human_color = color
+                self.board.reset()
+                self.pending_engine_move = None
+                self.state = GameState.NEED_SETUP
+                self.generation += 1       # discard any move the engine is mid-computing
+            side = "white" if color == chess.WHITE else "black"
+            return Reaction(select_skill=skill, select_color=color,
+                            message=f"Settings: level {skill}, human plays {side}")
 
         if self.state == GameState.NEED_SETUP:
             if reading.matches(self.board):
@@ -486,13 +500,15 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
     """
     state, board = game.state, game.board
 
-    # Strength selection gesture: show the chosen level and how to start, and light
-    # the king's square -- never flag it as a wrong position.
-    picked = detect_strength_selection(board, sensed.piece_map(), game.human_color)
+    # Settings gesture: show the chosen level and side and how to start, and light the
+    # king's square -- never flag it as a wrong position.
+    picked = detect_strength_selection(board, sensed.piece_map())
     if picked is not None:
-        skill, ksq = picked
+        skill, ksq, color = picked
+        side = "Weiß" if color == chess.WHITE else "Schwarz"
         return Guidance("Spielstärke wählen",
-                        f"Stufe {skill}. Zum Starten den König zurück auf sein Feld stellen.",
+                        f"Stufe {skill}, du spielst {side}. "
+                        "Zum Starten den König zurück auf sein Feld stellen.",
                         [ksq], alert=False)
 
     if state == GameState.NEED_SETUP:

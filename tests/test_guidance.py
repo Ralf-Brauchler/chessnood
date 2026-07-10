@@ -34,9 +34,22 @@ def test_strength_selection_shows_level_and_lights_king():
     sensed.set_piece_map(pm)
     gd = compute_guidance(g, sensed)
     assert gd.status == "Spielstärke wählen"
-    assert "6" in gd.instruction
+    assert "6" in gd.instruction and "Weiß" in gd.instruction
     assert gd.highlight == [chess.F4]
     assert not gd.alert
+
+
+def test_strength_selection_black_king_shows_black_side():
+    g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
+    sensed = chess.Board()
+    pm = sensed.piece_map()
+    del pm[chess.E8]
+    pm[chess.D5] = chess.Piece(chess.KING, chess.BLACK)   # file d -> level 4, play black
+    sensed.set_piece_map(pm)
+    gd = compute_guidance(g, sensed)
+    assert gd.status == "Spielstärke wählen"
+    assert "4" in gd.instruction and "Schwarz" in gd.instruction
+    assert gd.highlight == [chess.D5]
 
 
 def test_lifted_piece_is_not_an_error():
