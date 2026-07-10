@@ -1,0 +1,13 @@
+[Unit]
+Description=Check for chessnood updates periodically
+
+[Timer]
+# First check a few minutes after boot, then every half hour. The randomized delay
+# spreads the GitHub hit and Persistent=true catches up a check missed while off.
+OnBootSec=3min
+OnUnitActiveSec=30min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

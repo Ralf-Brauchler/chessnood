@@ -99,3 +99,48 @@ In `config.yaml` under `engine:`:
 - `move_time_ms` — lower = snappier, higher = stronger.
 
 Changes are picked up automatically at the start of the computer's next move.
+
+## 7. A Pi at a remote site (e.g. a relative's house)
+
+Once the box lives on someone else's network you can't reach it by `.local` (mDNS
+is LAN-only) and their router NATs it away. Two complementary mechanisms cover this;
+set up **both**.
+
+**Deploy from a git checkout, not rsync.** So the Pi can update itself, install it
+with `git clone` rather than copying files:
+
+```
+git clone https://github.com/<you>/chessnood.git ~/chessnood
+cd ~/chessnood && ./scripts/install_pi.sh
+```
+
+### Hands-off updates (self-update timer)
+
+`install_pi.sh` installs `chessnood-update.timer`, which every ~30 min runs a
+`git pull` of the branch the Pi has checked out and restarts the services **only if
+it moved**. It talks *out* to GitHub, so it needs no VPN, no port forwarding, and
+nothing exposed. Which branch a Pi follows is just the branch it's on:
+
+- **Test Pi at home:** stay on `master`.
+- **Pi at the remote site:** put it on a `release` branch (`git checkout release`).
+- Promote a tested change with `git push origin master:release`; the remote Pi
+  picks it up on its next tick. Never push straight to `release` untested — a broken
+  commit lands unattended where nobody can fix it. `systemctl restart` keeps the
+  service alive, but a commit that crashes on start would loop.
+
+Check it: `systemctl list-timers chessnood-update` and `journalctl -u chessnood-update`.
+
+### Remote access (Tailscale)
+
+For SSH / the web view / `journalctl` from anywhere, put the Pi on a [Tailscale](https://tailscale.com)
+tailnet (free; punches through NAT, gives a stable name). On the Pi **and** your
+machine:
+
+```
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up            # opens a login URL -- authenticate to your account
+```
+
+Then reach it by its tailnet name from anywhere: `ssh <you>@chessnood-vater`,
+`http://chessnood-vater:8080/`. Keep the web view **inside** the tailnet (do not
+port-forward it: it has no authentication).

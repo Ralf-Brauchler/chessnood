@@ -24,13 +24,23 @@ sudo udevadm control --reload && sudo udevadm trigger
 echo ">> Installing systemd services (rendered for user '$(whoami)' at $PWD)..."
 # Fill in the deploying user and project dir, so it works regardless of username
 # (the Pi user here is not 'pi'). __USER__/__DIR__ are placeholders in the units.
-for unit in chessnood chessnood-web; do
+for unit in systemd/chessnood.service systemd/chessnood-web.service \
+            systemd/chessnood-update.service systemd/chessnood-update.timer; do
     sed -e "s|__USER__|$(whoami)|g" -e "s|__DIR__|$PWD|g" \
-        "systemd/$unit.service" | sudo tee "/etc/systemd/system/$unit.service" >/dev/null
+        "$unit" | sudo tee "/etc/systemd/system/$(basename "$unit")" >/dev/null
 done
+chmod +x scripts/chessnood-update.sh
 sudo systemctl daemon-reload
 sudo systemctl enable chessnood.service
-sudo systemctl enable chessnood-web.service   # read-only status page on :8080
+sudo systemctl enable chessnood-web.service     # read-only status page on :8080
+# Self-update only makes sense from a git checkout (not an rsync copy). Enable the
+# timer when this is one, so a Pi at a remote site keeps itself up to date.
+if git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
+    sudo systemctl enable chessnood-update.timer  # hourly-ish `git pull` + restart
+else
+    echo ">> NOTE: not a git checkout -- skipping the self-update timer."
+    echo "   For a remote site, deploy with 'git clone' so it can update itself."
+fi
 
 echo
 echo ">> NOTE: set up the 3.5\" screen overlay separately -- see docs/SETUP_PI.md"

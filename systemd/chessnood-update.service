@@ -1,0 +1,12 @@
+[Unit]
+Description=chessnood self-update (pull tracked branch, restart on change)
+# Needs the network; don't fail the boot if GitHub is briefly unreachable -- the
+# timer will simply try again on its next tick.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Runs as root so it can restart the game/web units; the script drops to the repo
+# owner for all git/pip work. __USER__/__DIR__ are filled in by install_pi.sh.
+Type=oneshot
+ExecStart=__DIR__/scripts/chessnood-update.sh __DIR__ __USER__
