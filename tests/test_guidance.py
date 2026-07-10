@@ -25,6 +25,20 @@ def test_player_turn_normal():
     assert not gd.alert and gd.highlight == []
 
 
+def test_strength_selection_shows_level_and_lights_king():
+    g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
+    sensed = chess.Board()
+    pm = sensed.piece_map()
+    del pm[chess.E1]
+    pm[chess.F4] = chess.Piece(chess.KING, chess.WHITE)   # file f -> level 6
+    sensed.set_piece_map(pm)
+    gd = compute_guidance(g, sensed)
+    assert gd.status == "Spielstärke wählen"
+    assert "6" in gd.instruction
+    assert gd.highlight == [chess.F4]
+    assert not gd.alert
+
+
 def test_lifted_piece_is_not_an_error():
     g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
     sensed = chess.Board()

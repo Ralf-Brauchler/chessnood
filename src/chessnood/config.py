@@ -7,6 +7,7 @@ takes effect on the next move without a restart.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,51 @@ from typing import Any
 import chess
 import yaml
 
+from .atomicio import atomic_write_text
+
 log = logging.getLogger(__name__)
+
+_SKILL_LINE = re.compile(r"(?m)^(?P<indent>[ \t]*)skill_level:[ \t]*\S+(?P<tail>.*)$")
+
+
+def write_skill_level(path: str | Path, skill_level: int) -> None:
+    """Persist ``skill_level`` into the YAML config, preserving the rest of the file.
+
+    Written when the player picks a strength on the board (see
+    :func:`chessnood.game.detect_strength_selection`). We edit the single line rather
+    than re-dumping the YAML so hand-written comments and layout survive: replace an
+    existing ``skill_level:`` line (keeping its indent and any inline comment), or
+    insert one under the ``engine:`` block if none exists. Written atomically so a
+    power cut mid-write can't corrupt the config the appliance reads on boot.
+    """
+    p = Path(path)
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    new, replaced = _SKILL_LINE.subn(rf"\g<indent>skill_level: {skill_level}\g<tail>",
+                                     text, count=1)
+    if not replaced:
+        new = _insert_skill_level(text, skill_level)
+    atomic_write_text(p, new)
+
+
+def _insert_skill_level(text: str, skill_level: int) -> str:
+    """Add a ``skill_level:`` line under ``engine:`` (or a fresh ``engine:`` block)."""
+    lines = text.splitlines()
+    out: list[str] = []
+    inserted = False
+    for line in lines:
+        out.append(line)
+        if not inserted and re.match(r"^engine:[ \t]*(#.*)?$", line):
+            out.append(f"  skill_level: {skill_level}")
+            inserted = True
+    if not inserted:
+        if out and out[-1].strip():
+            out.append("")
+        out += ["engine:", f"  skill_level: {skill_level}"]
+    result = "\n".join(out)
+    return result + "\n" if (not text or text.endswith("\n")) else result
 
 
 def _known(cls, data: Any) -> dict[str, Any]:
@@ -152,6 +197,14 @@ class ConfigWatcher:
         if self.path and self.path.exists():
             self._mtime = self.path.stat().st_mtime
         return Config.load(self.path)
+
+    def reload(self) -> Config:
+        """Force an immediate re-read and adopt it. Use right after we wrote the
+        file ourselves (e.g. a strength picked on the board), so we don't depend on
+        the mtime having advanced past the last poll -- and so the next :meth:`poll`
+        won't needlessly reload it again."""
+        self.current = self._read()
+        return self.current
 
     def poll(self) -> tuple[bool, Config]:
         """Return (changed, config). Reloads only if the file's mtime changed.

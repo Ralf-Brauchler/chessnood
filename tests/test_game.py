@@ -2,11 +2,65 @@
 import chess
 
 from chessnood.boards.base import BoardReading
-from chessnood.game import ChessGame, Detection, GameState, detect_move
+from chessnood.game import (
+    ChessGame,
+    Detection,
+    GameState,
+    detect_move,
+    detect_strength_selection,
+)
 
 
 def reading_of(board: chess.Board) -> BoardReading:
     return BoardReading.from_board(board)
+
+
+def _king_on(square: int, color: chess.Color = chess.WHITE) -> dict:
+    """Start position with ``color``'s king lifted onto ``square``."""
+    home = chess.E1 if color == chess.WHITE else chess.E8
+    pm = chess.Board().piece_map()
+    del pm[home]
+    pm[square] = chess.Piece(chess.KING, color)
+    return pm
+
+
+def test_strength_selection_maps_files_a_to_h_to_1_to_8():
+    game = ChessGame(human_color=chess.WHITE)
+    files = [chess.A3, chess.B4, chess.C3, chess.D5, chess.E4, chess.F6, chess.G3, chess.H5]
+    for expected, square in enumerate(files, start=1):
+        react = game.feed(BoardReading(_king_on(square)))
+        assert react.select_skill == expected
+        assert react.engine_should_move is False
+        assert game.state == GameState.NEED_SETUP     # a gesture never starts play
+
+
+def test_strength_selection_ignores_rank_only_file_counts():
+    game = ChessGame(human_color=chess.WHITE)
+    assert game.feed(BoardReading(_king_on(chess.C3))).select_skill == 3
+    assert game.feed(BoardReading(_king_on(chess.C6))).select_skill == 3
+
+
+def test_no_selection_when_king_home_begins_play():
+    game = ChessGame(human_color=chess.WHITE)
+    react = game.feed(reading_of(chess.Board()))
+    assert react.select_skill is None
+    assert game.state == GameState.PLAYER_TURN
+
+
+def test_no_selection_once_a_move_has_been_played():
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))              # begin play
+    board = chess.Board(); board.push_uci("e2e4")
+    game.board = board
+    # even a king-on-empty pattern must not be read as a selection mid-game
+    assert detect_strength_selection(board, _king_on(chess.C3), chess.WHITE) is None
+
+
+def test_no_selection_when_another_piece_also_moved():
+    board = chess.Board()
+    pieces = _king_on(chess.C3)
+    pieces[chess.E5] = pieces.pop(chess.E2)           # also nudged a pawn
+    assert detect_strength_selection(board, pieces, chess.WHITE) is None
 
 
 def test_detect_simple_move():

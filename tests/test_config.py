@@ -6,7 +6,34 @@ from chessnood.config import (
     Config,
     ConfigWatcher,
     EngineConfig,
+    write_skill_level,
 )
+
+
+def test_write_skill_level_replaces_line_keeping_comments(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text("engine:\n  path: stockfish\n  skill_level: 5  # 0..20\n"
+                 "  move_time_ms: 800\n")
+    write_skill_level(p, 8)
+    assert Config.load(p).engine.skill_level == 8
+    text = p.read_text()
+    assert "# 0..20" in text                     # inline comment preserved
+    assert "move_time_ms: 800" in text           # rest of the block untouched
+
+
+def test_write_skill_level_inserts_under_engine_when_absent(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text("engine:\n  path: stockfish\n")
+    write_skill_level(p, 3)
+    assert Config.load(p).engine.skill_level == 3
+
+
+def test_write_skill_level_creates_block_when_no_engine(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text("log_level: info\n")
+    write_skill_level(p, 4)
+    assert Config.load(p).engine.skill_level == 4
+    assert "log_level: info" in p.read_text()
 
 
 def test_defaults_when_no_path():

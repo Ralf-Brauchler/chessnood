@@ -19,7 +19,7 @@ import chess
 
 from .atomicio import atomic_write_text
 from .boards.base import Board, ConnectionState
-from .config import ConfigWatcher
+from .config import ConfigWatcher, write_skill_level
 from .display import UiModel, make_display
 from .engine import Engine
 from .game import ChessGame, GameState, Guidance, Reaction, compute_guidance
@@ -268,6 +268,11 @@ class Runner:
         if reaction.invalid:
             log.debug("Board reading does not match a legal move (transient)")
 
+        # Strength picked on the board: persist it before we redraw, so the screen's
+        # strength line and the engine reflect the new level immediately.
+        if reaction.select_skill is not None:
+            await self._apply_skill_selection(reaction.select_skill)
+
         # Work out what to show/say and which squares to light, then apply it to
         # the board LEDs (primary move indicator) and the screen together.
         await self._apply_guidance(beep=True)
@@ -373,6 +378,30 @@ class Runner:
                 await self._board.beep(600, 400)            # game over
         self._prev_state = self._game.state
         self._prev_alert = self._ui.alert
+
+    async def _apply_skill_selection(self, skill: int) -> None:
+        """Persist a strength picked on the board and apply it live.
+
+        Writes ``skill_level`` back to config.yaml (so it survives a restart and is
+        visible via ``nano config.yaml``), then re-reads through the ConfigWatcher so
+        the engine and the screen's strength line pick it up at once. A short rising
+        beep confirms each new level."""
+        if skill == self._watcher.current.engine.skill_level:
+            return                                  # already on this level -> nothing to do
+        if self._watcher.path is None:
+            log.info("Strength %s picked on the board but no config file to persist it", skill)
+            return
+        try:
+            write_skill_level(self._watcher.path, skill)
+        except OSError as exc:
+            log.warning("Could not persist the picked strength: %s", exc)
+            return
+        cfg = self._watcher.reload()                 # adopt our own write deterministically
+        self._engine.configure(cfg.engine)
+        log.info("Strength set from the board: skill_level=%s", skill)
+        self._publish_status(skill_level=skill)
+        if self._beeps:
+            await self._board.beep(900 + skill * 90, 90)
 
     async def _do_engine_move(self) -> None:
         # Reload settings (e.g. skill_level changed over SSH) before thinking.

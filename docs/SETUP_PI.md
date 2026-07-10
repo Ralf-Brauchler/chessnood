@@ -101,6 +101,13 @@ In `config.yaml` under `engine:`:
 
 Changes are picked up automatically at the start of the computer's next move.
 
+**From the board (no SSH):** with the pieces in the start position, lift your king
+and set it on any empty square — the **file** picks the strength (a = level 1 … h =
+level 8) and the screen shows the chosen level. Put the king back on its home square
+to start playing at that strength. This writes `skill_level` into `config.yaml`, so
+it sticks across restarts. (Note: an active `elo_limit` would override it — leave it
+unset to use this.)
+
 ## 7. A Pi at a remote site (e.g. a relative's house)
 
 Once the box lives on someone else's network you can't reach it by `.local` (mDNS

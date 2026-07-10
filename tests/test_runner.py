@@ -3,7 +3,7 @@ import asyncio
 
 import chess
 
-from chessnood.boards.base import ConnectionState
+from chessnood.boards.base import BoardReading, ConnectionState
 from chessnood.boards.mock import MockBoard
 from chessnood.config import ConfigWatcher
 from chessnood.display import Display, UiModel
@@ -98,6 +98,28 @@ def test_cleanup_lights_one_led_then_destination(tmp_path):
     asyncio.run(r._apply_guidance(beep=False))
     assert r._fixing is None
     assert r._ui.status == "Du bist am Zug" and r._ui.highlight == []
+
+
+def test_strength_selection_persists_and_updates_screen(tmp_path):
+    """End-to-end: the king lifted onto a file writes skill_level to the config,
+    reloads it, and the screen shows the selection plus the new strength line."""
+    r = _runner(tmp_path, extra="engine:\n  skill_level: 5\n")
+    r._connection = ConnectionState.CONNECTED
+
+    sensed = chess.Board()
+    pm = sensed.piece_map(); del pm[chess.E1]
+    pm[chess.G4] = chess.Piece(chess.KING, chess.WHITE)   # file g -> level 7
+    sensed.set_piece_map(pm)
+    r._sensed = _pieces(sensed)
+    reaction = r._game.feed(BoardReading(sensed.piece_map()))
+    assert reaction.select_skill == 7
+
+    asyncio.run(r._apply(reaction))
+
+    assert r._watcher.current.engine.skill_level == 7
+    assert "skill_level: 7" in (tmp_path / "c.yaml").read_text()
+    assert r._display.last.status == "Spielstärke wählen"
+    assert r._display.last.detail.endswith("Stufe 7")
 
 
 def test_engine_hang_times_out_and_plays_a_fallback(tmp_path, monkeypatch):
