@@ -58,7 +58,7 @@ def _model_from_status(data: dict | None) -> UiModel:
         except ValueError:
             pass
     return UiModel(conn, data.get("status") or "", data.get("instruction") or "",
-                   board, highlight)
+                   board, highlight, detail=data.get("detail") or "")
 
 
 def render_screen_png(cfg: Config) -> bytes:

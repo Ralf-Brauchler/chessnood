@@ -198,6 +198,7 @@ class Runner:
             "instruction": model.instruction,
             "fen": model.board.fen() if model.board is not None else None,
             "highlight": [chess.square_name(s) for s in model.highlight],
+            "detail": model.detail,
             "battery": self._board.battery,
         }
         fields.update(extra)
