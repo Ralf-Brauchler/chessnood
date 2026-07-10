@@ -257,14 +257,16 @@ def cmd_preview(args: argparse.Namespace) -> int:
         mid.push_uci(uci)
     samples = [
         UiModel(ConnectionState.SCANNING, "Suche das Brett …",
-                "Schalte das Brett ein und warte kurz.", chess.Board()),
+                "Schalte das Brett ein und warte kurz.", chess.Board(),
+                detail="Computer: Stufe 5"),
         UiModel(ConnectionState.CONNECTED, "Stelle die Figuren auf",
-                "Stelle alle Figuren auf die Grundstellung.", chess.Board()),
+                "Stelle alle Figuren auf die Grundstellung.", chess.Board(),
+                detail="Computer: Stufe 5"),
         UiModel(ConnectionState.CONNECTED, "Du bist am Zug",
-                "Mach deinen Zug auf dem Brett.", mid),
+                "Mach deinen Zug auf dem Brett.", mid, detail="Computer: Stufe 5"),
         UiModel(ConnectionState.CONNECTED, "Computer hat gezogen",
                 "Die leuchtenden Felder zeigen den Zug. Führe ihn auf dem Brett aus.",
-                mid, [chess.G1, chess.F3]),
+                mid, [chess.G1, chess.F3], detail="Computer: Stufe 5"),
     ]
     frames = [render(s) for s in samples]
     gap = 12

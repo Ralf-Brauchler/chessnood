@@ -43,6 +43,13 @@ CAPTURE_CROSS_OFF_S = 0.4
 # write per interval.
 STATUS_REFRESH_S = 60.0
 
+# Re-assert the screen this often. The service draws on events (moves, connection
+# changes), but between boot and the first move nothing would redraw -- so the
+# Linux login console stays visible on the framebuffer. A frequent, cheap repaint
+# (just replays the last packed frame) makes the UI appear within seconds of boot
+# and self-heal if anything else writes to the framebuffer.
+SCREEN_REFRESH_S = 2.0
+
 
 def _board_from_pieces(pieces: dict) -> chess.Board:
     """A board carrying just the sensed piece placement, for rendering."""
@@ -118,6 +125,7 @@ class Runner:
             asyncio.create_task(self._handle_states(states)),
             asyncio.create_task(self._handle_readings(readings)),
             asyncio.create_task(self._status_heartbeat()),
+            asyncio.create_task(self._screen_heartbeat()),
             asyncio.create_task(watchdog.heartbeat()),
         ]
         try:
@@ -150,18 +158,28 @@ class Runner:
     # --- screen -----------------------------------------------------------
     def _current_model(self) -> UiModel:
         """The single UiModel that both the screen and the status snapshot use."""
+        detail = self._strength_text()
         if self._connection != ConnectionState.CONNECTED:
             status = {
                 ConnectionState.SCANNING: "Suche das Brett …",
                 ConnectionState.ERROR: "Verbindung verloren",
             }.get(self._connection, "Nicht verbunden")
             return UiModel(self._connection, status,
-                           "Schalte das Brett ein und warte kurz.", self._sensed)
+                           "Schalte das Brett ein und warte kurz.", self._sensed,
+                           detail=detail)
         # show the guidance's target position if it has one (e.g. "set it up like
         # this"), otherwise the live physically sensed board
         board = self._ui.target if self._ui.target is not None else self._sensed
         return UiModel(self._connection, self._ui.status,
-                       self._ui.instruction, board, self._ui.highlight)
+                       self._ui.instruction, board, self._ui.highlight, detail=detail)
+
+    def _strength_text(self) -> str:
+        """A short, always-on line describing the current engine strength, so the
+        setting is visible on the screen from boot (tuned over SSH between games)."""
+        eng = self._watcher.current.engine
+        if eng.elo_limit:
+            return f"Computer: ca. {eng.elo_limit} Elo"
+        return f"Computer: Stufe {eng.skill_level}"
 
     def _refresh_screen(self) -> None:
         self._display.update(self._current_model())
@@ -191,6 +209,13 @@ class Runner:
         while True:
             await asyncio.sleep(STATUS_REFRESH_S)
             self._publish_status()
+
+    async def _screen_heartbeat(self) -> None:
+        """Periodically re-assert the screen so the UI shows from boot and isn't
+        left buried under the Linux login console until the first move."""
+        while True:
+            await asyncio.sleep(SCREEN_REFRESH_S)
+            self._display.repaint()
 
     async def _handle_states(self, states: "asyncio.Queue[ConnectionState]") -> None:
         while True:

@@ -60,9 +60,11 @@ ADS7846 PENIRQ never fires — goodtft's patched kernel would be required). We d
 use it: a **new game is started by resetting the pieces to the start position**, so
 no touch or button is needed.
 
-**Boot console on the screen (optional):** until the service draws, the Linux text
-console is visible on `/dev/fb0`. To hide it from the player, add `fbcon=map:2` to
-`/boot/firmware/cmdline.txt` and enable the chessnood service to autostart.
+**Boot console on the screen:** the service redraws the screen on a short heartbeat,
+so the chessnood UI comes up on its own within a couple of seconds of the service
+starting and reasserts itself over the Linux login console — no cmdline change is
+required. To also suppress the brief flash of boot/login text before the service is
+up, add `fbcon=map:2` to `/boot/firmware/cmdline.txt` (optional).
 
 ## 4. The board (USB)
 

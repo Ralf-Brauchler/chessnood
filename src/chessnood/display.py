@@ -69,6 +69,7 @@ class UiModel:
     instruction: str = ""     # one-line plain-language guidance
     board: chess.Board | None = None
     highlight: list[int] = field(default_factory=list)  # squares to outline
+    detail: str = ""          # small always-on state line, e.g. "Computer: Stufe 5"
 
 
 # --- rendering (pure Pillow) ---------------------------------------------
@@ -173,6 +174,12 @@ def render(model: UiModel):
             draw.text((_PANEL_X, y), line, font=font, fill=_MUTED)
             y += 26
 
+    # always-on state line (e.g. engine strength) pinned near the bottom of the
+    # right panel, so the current setting is visible from boot and while idle
+    if model.detail:
+        font = _fit_font(draw, model.detail, SCREEN_W - _PANEL_X - 14, 18, 13)
+        draw.text((_PANEL_X, 228), model.detail, font=font, fill=_MUTED)
+
     # footer hint: a new game is started simply by resetting the pieces
     # (no touch/button -- the resistive touch panel is unreliable on this board)
     draw.line((12, 254, SCREEN_W - 12, 254), fill=(40, 46, 54), width=1)
@@ -188,6 +195,14 @@ class Display:
     """Base / no-op display. ``backend: none`` uses this directly."""
 
     def update(self, model: UiModel) -> None:  # pragma: no cover - no-op
+        pass
+
+    def repaint(self) -> None:  # pragma: no cover - no-op
+        """Re-assert the last drawn frame (e.g. over a boot/login console).
+
+        Called on a periodic heartbeat so the UI appears within seconds of boot
+        and self-heals if anything else writes to the framebuffer. Cheap by
+        design: no re-render, just replay of the last bytes where meaningful."""
         pass
 
     def close(self) -> None:  # pragma: no cover - no-op
@@ -228,14 +243,25 @@ class FramebufferDisplay(Display):
         self._cfg = cfg
         self._fb = cfg.fb_device
         self._fb_size, self._bpp = _probe_framebuffer(self._fb)
+        self._last_bytes: bytes | None = None  # packed frame, replayed by repaint()
 
     def update(self, model: UiModel) -> None:
         img = render(model)
         if self._cfg.rotate:
             img = img.rotate(-self._cfg.rotate, expand=True)  # VERIFY direction
+        self._last_bytes = _pack(img, self._bpp)
+        self._blit(self._last_bytes)
+
+    def repaint(self) -> None:
+        # Rewrite the cached frame (no re-render/re-pack) so the heartbeat is a
+        # cheap file write; nothing to do until the first frame has been drawn.
+        if self._last_bytes is not None:
+            self._blit(self._last_bytes)
+
+    def _blit(self, data: bytes) -> None:
         try:
             with open(self._fb, "wb") as fh:
-                fh.write(_pack(img, self._bpp))
+                fh.write(data)
         except OSError as exc:
             log.debug("Framebuffer write failed: %s", exc)
 
