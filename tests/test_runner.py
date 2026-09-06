@@ -1,5 +1,6 @@
 """Runner wiring: connection-state screen, and resilience to a bad save file."""
 import asyncio
+import json
 
 import chess
 
@@ -336,3 +337,44 @@ def test_repeated_unmatched_readings_log_once(tmp_path, caplog):
 
     lines = [rec.getMessage() for rec in caplog.records if "no legal move" in rec.getMessage()]
     assert len(lines) == 2
+
+
+# Real incident: after a restart mid-game the screen showed "Das passt nicht" and
+# lit c1, because _sensed still held the placeholder START position and was
+# compared against the resumed middlegame. It stood there until someone touched a
+# piece -- readings only arrive on change.
+_RESUMED = "r1b1k2r/1p2qppp/p1n5/8/7P/1P2BPb1/P1PK2P1/RN1Q1BNR w - - 0 1"
+
+
+def test_resumed_game_does_not_alarm_before_the_first_reading(tmp_path):
+    save = tmp_path / "g.json"
+    save.write_text(json.dumps({"fen": _RESUMED, "state": "PLAYER_TURN",
+                                "pending": None, "human_color": "white"}))
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("board:\n  backend: mock\ndisplay:\n  backend: none\n"
+                   f"game_state_file: {save}\n"
+                   f"status_file: {tmp_path / 's.json'}\n")
+
+    r = Runner(MockBoard(), ConfigWatcher(str(cfg)))
+    r._display = RecordingDisplay()
+    r._connection = ConnectionState.CONNECTED
+    r._recompute_guidance()
+    r._refresh_screen()
+
+    assert r._game.board.board_fen() == chess.Board(_RESUMED).board_fen()
+    assert not r._ui.alert
+    assert r._ui.highlight == []
+    assert r._display.last.status == "Du bist am Zug"
+
+
+def test_fresh_start_still_asks_for_the_start_position(tmp_path):
+    """No save file -> the placeholder equals the start position, so setup
+    guidance must be unchanged."""
+    r = _runner(tmp_path)
+    r._connection = ConnectionState.CONNECTED
+    r._recompute_guidance()
+    r._refresh_screen()
+
+    assert r._game.state == GameState.NEED_SETUP
+    assert not r._ui.alert
+    assert "Figuren" in r._display.last.status

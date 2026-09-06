@@ -106,6 +106,13 @@ class Runner:
         self._accept_handle: asyncio.TimerHandle | None = None
         self._game_file = Path(cfg.game_state_file) if cfg.game_state_file else None
         self._load_game()
+        # Until the board reports for the first time, assume it matches the game.
+        # The placeholder above is the START position, so a game resumed mid-play
+        # was compared against it and the very first screen cried "Das passt nicht"
+        # over a board where nothing was wrong -- and it stood until someone moved
+        # a piece, because readings only arrive on change. Optimism is the safe
+        # default here: a real mismatch is caught by the first reading anyway.
+        self._sensed = self._game.board.copy(stack=False)
 
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
