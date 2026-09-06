@@ -3,6 +3,7 @@ import asyncio
 
 import chess
 
+from chessnood.boards.base import BoardReading
 from chessnood.boards.mock import MockBoard
 from chessnood.config import ConfigWatcher
 from chessnood.game import GameState
@@ -74,3 +75,25 @@ def test_alert_beep_fires_once_not_every_reading(tmp_path):
     asyncio.run(r._apply_guidance(beep=True))
     asyncio.run(r._apply_guidance(beep=True))  # still wrong, no new transition
     assert sum(1 for freq, _ in r._board.beeps if freq == 350) == 1
+
+
+_CHECK_MOVE = "4k3/8/8/6b1/8/8/6P1/4K3 b - - 0 1"     # ...Bg5-h4 will check Ke1
+
+
+def test_check_sounds_its_own_tone_once(tmp_path):
+    r = _runner(tmp_path)
+    r._game.board = chess.Board(_CHECK_MOVE)
+    r._game.state = GameState.ENGINE_MOVE_SHOWN
+    r._game.pending_engine_move = chess.Move.from_uci("g5h4")
+    # the player finishes executing the computer's checking move
+    after = chess.Board(_CHECK_MOVE)
+    after.push_uci("g5h4")
+    r._sensed = after
+    asyncio.run(r._apply(r._game.feed(BoardReading(dict(after.piece_map())))))
+
+    assert r._game.state == GameState.PLAYER_TURN
+    assert (1300, 260) in r._board.beeps                  # the check tone
+    before = len(r._board.beeps)
+
+    asyncio.run(r._apply(r._game.feed(BoardReading(dict(after.piece_map())))))
+    assert len(r._board.beeps) == before                  # still in check -> silent

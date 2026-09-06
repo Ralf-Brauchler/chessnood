@@ -355,3 +355,65 @@ def test_piece_in_hand_alone_is_still_ordinary_play():
 
     assert gd.status == "Du bist am Zug"
     assert not gd.alert
+
+
+# Check has to reach the player on the BOARD: the king he must save and the piece
+# threatening it, lit together. He cannot read notation, so a screen line alone
+# would not tell him which piece is the threat.
+_IN_CHECK = "4k3/8/8/8/7b/8/6P1/4K3 w - - 0 1"        # Bh4 checks the white Ke1
+
+
+def test_check_lights_the_king_and_its_attacker():
+    g = _game(_IN_CHECK, GameState.PLAYER_TURN)
+    gd = compute_guidance(g, chess.Board(_IN_CHECK))
+
+    assert gd.status == "Schach!"
+    assert gd.highlight == [chess.E1, chess.H4]
+    assert gd.check
+    assert not gd.alert          # check is legal play, not a position to fix
+
+
+def test_check_stays_lit_while_a_piece_is_in_hand():
+    """He lifts a piece to escape -- the king must not go dark mid-move."""
+    g = _game(_IN_CHECK, GameState.PLAYER_TURN)
+    sensed = chess.Board(_IN_CHECK)
+    pm = sensed.piece_map()
+    del pm[chess.G2]                                   # pawn in hand
+    sensed.set_piece_map(pm)
+
+    gd = compute_guidance(g, sensed)
+
+    assert gd.status == "Schach!"
+    assert gd.highlight == [chess.E1, chess.H4]
+
+
+def test_a_wrong_position_outranks_the_check_signal():
+    """A board that needs fixing must keep the correction LEDs -- two competing
+    meanings on the same LEDs would be worse than either alone."""
+    g = _game(_IN_CHECK, GameState.PLAYER_TURN)
+    sensed = chess.Board(_IN_CHECK)
+    pm = sensed.piece_map()
+    pm[chess.A5] = pm.pop(chess.G2)                    # pawn put on a wrong square
+    sensed.set_piece_map(pm)
+
+    gd = compute_guidance(g, sensed)
+
+    assert gd.alert and not gd.check
+    assert gd.highlight == [chess.A5]
+
+
+def test_giving_check_is_shown_while_the_engine_thinks():
+    # Re1 checks the black Ke8; the computer (Black) is to move.
+    g = _game("4k3/8/8/8/8/8/8/4RK2 b - - 0 1", GameState.ENGINE_THINKING)
+    gd = compute_guidance(g, chess.Board())
+
+    assert "Schach" in gd.instruction
+    assert not gd.check          # only the player's OWN check sounds the tone
+
+
+def test_no_check_signal_in_a_quiet_position():
+    g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
+    gd = compute_guidance(g, chess.Board())
+
+    assert gd.status == "Du bist am Zug"
+    assert not gd.check and gd.highlight == []

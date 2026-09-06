@@ -255,6 +255,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
     mid = chess.Board()
     for uci in ("e2e4", "e7e5", "g1f3"):
         mid.push_uci(uci)
+    checked = chess.Board("4k3/8/8/8/7b/8/6P1/4K3 w - - 0 1")   # Bh4 checks Ke1
     samples = [
         UiModel(ConnectionState.SCANNING, "Suche das Brett …",
                 "Schalte das Brett ein und warte kurz.", chess.Board(),
@@ -267,6 +268,9 @@ def cmd_preview(args: argparse.Namespace) -> int:
         UiModel(ConnectionState.CONNECTED, "Computer hat gezogen",
                 "Die leuchtenden Felder zeigen den Zug. Führe ihn auf dem Brett aus.",
                 mid, [chess.G1, chess.F3], detail="Computer: Stufe 5"),
+        UiModel(ConnectionState.CONNECTED, "Schach!",
+                "Dein König steht im Schach. Du musst ihn retten.",
+                checked, [chess.E1, chess.H4], detail="Computer: Stufe 5"),
     ]
     frames = [render(s) for s in samples]
     gap = 12

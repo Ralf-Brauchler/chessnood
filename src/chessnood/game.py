@@ -330,6 +330,10 @@ class Guidance:
     # (src, dst) of the piece currently being cleaned up, threaded back by the
     # runner so the destination lights after the piece is lifted (see _plan_recovery)
     fixing: "tuple[int, int] | None" = None
+    # The player's own king is in check. Drives the board's check tone; kept apart
+    # from ``alert`` because check is a legal, normal state, not something to fix
+    # (``alert`` also arms the runner's accept-the-position timer).
+    check: bool = False
 
 
 def _diff_squares(a: chess.Board, b: chess.Board) -> list[int]:
@@ -541,6 +545,22 @@ def _engine_move_guidance(game: chess.Board, move: chess.Move) -> tuple[list[int
     return involved, "Führe den leuchtenden Zug aus."
 
 
+def _player_turn_guidance(board: chess.Board) -> Guidance:
+    """"Your move" -- or, in check, the one thing the player has to be told.
+
+    Light the attacked king together with whatever attacks it: the LEDs are where
+    he is already looking, and they say *which* piece is the threat without a word
+    of notation. Not an ``alert`` -- being in check is legal play, and flagging it
+    as a fault would beep the error tone and arm the accept-the-position timer.
+    """
+    if not board.is_check():
+        return Guidance("Du bist am Zug", "Mach deinen Zug auf dem Brett.")
+    king = board.king(board.turn)
+    squares = sorted({king, *board.checkers()} - {None})
+    return Guidance("Schach!", "Dein König steht im Schach. Du musst ihn retten.",
+                    squares, check=True)
+
+
 def compute_guidance(game: "ChessGame", sensed: chess.Board,
                      fixing: "tuple[int, int] | None" = None) -> Guidance:
     """What to show/say given the game state and the sensed physical position.
@@ -574,13 +594,16 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
                         _missing_squares(sensed, start))
 
     if state == GameState.ENGINE_THINKING:
+        if board.is_check():                    # the player just gave check
+            return Guidance("Computer denkt …",
+                            "Du gibst Schach! Der Computer muss seinen König retten.")
         return Guidance("Computer denkt …", "Bitte einen Moment warten.")
 
     if state == GameState.PLAYER_TURN:
         # A bare lifted piece with nothing wrong and no correction in progress is
         # just a move being made -> "your move".
         if fixing is None and _is_lift_of(sensed, board):
-            return Guidance("Du bist am Zug", "Mach deinen Zug auf dem Brett.")
+            return _player_turn_guidance(board)
         promo = _promotion_square_in_progress(board, sensed)
         if promo is not None:
             return Guidance("Umwandlung",
@@ -598,7 +621,7 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
         if hl:
             status = "Das passt nicht" if alert else "Fast geschafft"
             return Guidance(status, instr, hl, target=board, alert=alert, fixing=new_fixing)
-        return Guidance("Du bist am Zug", "Mach deinen Zug auf dem Brett.")
+        return _player_turn_guidance(board)
 
     if state == GameState.ENGINE_MOVE_SHOWN and game.pending_engine_move is not None:
         move = game.pending_engine_move

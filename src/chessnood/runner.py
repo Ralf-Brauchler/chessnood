@@ -88,6 +88,7 @@ class Runner:
         self._beeps = cfg.board.beeps
         self._prev_state = self._game.state
         self._prev_alert = False
+        self._prev_check = False        # so the check tone sounds once, on entry
         # (src, dst) of the piece currently being cleaned up, threaded through
         # compute_guidance so that after a wrong piece is lifted we light the one
         # square it belongs on -- one whole piece at a time. None when not fixing.
@@ -393,12 +394,15 @@ class Runner:
             state = self._game.state
             if self._ui.alert and not self._prev_alert:
                 await self._board.beep(350, 220)            # something is wrong
+            elif self._ui.check and not self._prev_check:
+                await self._board.beep(1300, 260)           # his king is under attack
             elif state == GameState.ENGINE_MOVE_SHOWN and self._prev_state != state:
                 await self._board.beep(900, 120)            # your turn to play the move
             elif state == GameState.GAME_OVER and self._prev_state != state:
                 await self._board.beep(600, 400)            # game over
         self._prev_state = self._game.state
         self._prev_alert = self._ui.alert
+        self._prev_check = self._ui.check
 
     async def _apply_skill_selection(self, skill: int) -> None:
         """Persist a strength picked on the board and apply it live.
