@@ -81,6 +81,9 @@ class Runner:
         # the last position the board physically sensed (so the screen can show
         # what's actually on the board, including a piece lifted mid-move)
         self._sensed = chess.Board()
+        # Last sensed position already reported as unmatched, so a board that
+        # sits wrong logs once instead of on every reading (see _apply).
+        self._last_invalid_fen: str | None = None
         self._ui = Guidance("", "")  # current committed guidance (recomputed on settled readings)
         self._beeps = cfg.board.beeps
         self._prev_state = self._game.state
@@ -266,7 +269,18 @@ class Runner:
         if reaction.message:
             log.info("%s", reaction.message)
         if reaction.invalid:
-            log.debug("Board reading does not match a legal move (transient)")
+            # Record WHAT the board reported, not just that it was unmatched: this
+            # appliance cannot be inspected in person, so the sensed position is the
+            # only way to tell a piece that fell off from a real misplacement. Logged
+            # once per distinct position -- brief unmatched readings are normal
+            # mid-move, but a stuck one then leaves exactly one line to read.
+            fen = self._sensed.board_fen()
+            if fen != self._last_invalid_fen:
+                self._last_invalid_fen = fen
+                log.info("Board matches no legal move; sensed %s, expected %s",
+                         fen, self._game.board.board_fen())
+        else:
+            self._last_invalid_fen = None
 
         # Strength picked on the board: persist it before we redraw, so the screen's
         # strength line and the engine reflect the new level immediately.

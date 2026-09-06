@@ -11,6 +11,7 @@ whose resulting position matches what the board now senses. Transient states
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -150,6 +151,18 @@ class ChessGame:
         board = chess.Board(None)                 # empty: no castling/ep, turn White
         board.set_piece_map(sensed.piece_map())
         board.turn = self.human_color             # "let the player make his next move"
+        # Carry the running game's history across. Rebuilt from the piece map alone
+        # the board would silently lose castling rights and both move counters --
+        # taking a legal castle away from a player who never moved king or rook, and
+        # restarting the fifty-move clock. Keep only rights the sensed position can
+        # still support (clean_castling_rights filters by where king and rook now
+        # stand); an inconsistent set would fail is_valid() and block the adoption.
+        board.castling_rights = self.board.castling_rights
+        board.castling_rights = board.clean_castling_rights()
+        board.halfmove_clock = self.board.halfmove_clock
+        board.fullmove_number = self.board.fullmove_number
+        # En passant is deliberately not restored: the sensed position cannot say
+        # whether the last move was a double pawn step.
         if not board.is_valid():
             return Reaction()
         self.board = board
@@ -341,6 +354,27 @@ def _missing_squares(sensed: chess.Board, target: chess.Board) -> list[int]:
 Fixing = tuple[int, int]  # (source, destination) of the piece being corrected
 
 
+# The player cannot read coordinates (see the project's guidance rules), so a piece
+# that has to be FOUND -- one that fell off the board -- must be named in plain
+# German. Only the missing-piece prompt needs this; every other cue is a lit square.
+_PIECE_NOUNS = {
+    chess.PAWN: ("ein", "Bauer"),
+    chess.KNIGHT: ("ein", "Springer"),
+    chess.BISHOP: ("ein", "Läufer"),
+    chess.ROOK: ("ein", "Turm"),
+    chess.QUEEN: ("eine", "Dame"),
+    chess.KING: ("ein", "König"),
+}
+
+
+def _piece_phrase(piece: chess.Piece) -> str:
+    """``"ein schwarzer Springer"`` / ``"eine weiße Dame"``."""
+    article, noun = _PIECE_NOUNS[piece.piece_type]
+    colour = "weiß" if piece.color == chess.WHITE else "schwarz"
+    ending = "e" if article == "eine" else "er"
+    return f"{article} {colour}{ending} {noun}"
+
+
 def _plan_recovery(sensed: chess.Board, target: chess.Board,
                    fixing: "Fixing | None"
                    ) -> tuple[list[int], str, bool, "Fixing | None"]:
@@ -375,6 +409,24 @@ def _plan_recovery(sensed: chess.Board, target: chess.Board,
         if dst in missing and len(missing) > len(wrong):
             return [dst], "Stelle die Figur auf das leuchtende Feld.", False, fixing
         # placed, in hand elsewhere, or done -> fall through
+
+    # A piece that is nowhere on the board -- not merely displaced -- is the one
+    # thing the player cannot find by looking at the board, so light where it
+    # belongs BEFORE flagging any misplaced piece. Ranking by square index instead
+    # once lit d2 (a king legitimately moved there) while the real fault was a
+    # knight that had fallen off b6: a correctly occupied square lit up and the
+    # actual gap stayed dark. Only reprioritises a cleanup we would flag anyway --
+    # with nothing *wrong* on the board, missing pieces just mean "still being
+    # placed" or "in hand", which callers handle themselves.
+    if wrong:
+        displaced = Counter(smap[sq].symbol() for sq in wrong)
+        for sq in missing:
+            symbol = tmap[sq].symbol()
+            if displaced[symbol]:
+                displaced[symbol] -= 1     # that piece is merely on the wrong square
+                continue
+            return ([sq], f"Es fehlt {_piece_phrase(tmap[sq])}. "
+                    "Stelle die Figur auf das leuchtende Feld.", True, None)
 
     if wrong:
         src = wrong[0]

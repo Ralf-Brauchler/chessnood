@@ -290,3 +290,49 @@ def test_save_game_writes_a_restorable_file(tmp_path):
     r2 = Runner(MockBoard(), ConfigWatcher(str(tmp_path / "c.yaml")))
     assert r2._game.board.fen() == r._game.board.fen()
     assert r2._game.state == GameState.PLAYER_TURN
+
+
+def _feed(r, sensed: chess.Board):
+    """Push one settled reading through the game logic, as _handle_readings does."""
+    reading = BoardReading(dict(sensed.piece_map()))
+    r._sensed = sensed
+    asyncio.run(r._apply(r._game.feed(reading)))
+
+
+def test_unmatched_reading_logs_the_sensed_position(tmp_path, caplog):
+    """Without the sensed FEN in the journal, a stuck board is undiagnosable on a
+    device nobody can inspect in person."""
+    r = _runner(tmp_path)
+    r._game.state = GameState.PLAYER_TURN
+    sensed = chess.Board()
+    pm = sensed.piece_map()
+    del pm[chess.B1]
+    del pm[chess.G1]                       # two pieces gone -> matches no legal move
+    sensed.set_piece_map(pm)
+
+    with caplog.at_level("INFO", logger="chessnood.runner"):
+        _feed(r, sensed)
+
+    lines = [rec.getMessage() for rec in caplog.records if "no legal move" in rec.getMessage()]
+    assert len(lines) == 1
+    assert sensed.board_fen() in lines[0]
+    assert chess.Board().board_fen() in lines[0]       # and what was expected
+
+
+def test_repeated_unmatched_readings_log_once(tmp_path, caplog):
+    r = _runner(tmp_path)
+    r._game.state = GameState.PLAYER_TURN
+    sensed = chess.Board()
+    pm = sensed.piece_map()
+    del pm[chess.B1]
+    del pm[chess.G1]
+    sensed.set_piece_map(pm)
+
+    with caplog.at_level("INFO", logger="chessnood.runner"):
+        _feed(r, sensed)
+        _feed(r, sensed.copy())            # same wrong position, still sitting there
+        _feed(r, chess.Board())            # corrected -> latch clears
+        _feed(r, sensed.copy())            # wrong again -> reported again
+
+    lines = [rec.getMessage() for rec in caplog.records if "no legal move" in rec.getMessage()]
+    assert len(lines) == 2

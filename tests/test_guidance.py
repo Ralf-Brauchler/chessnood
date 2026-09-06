@@ -301,3 +301,57 @@ def test_real_wrong_position_still_alarms():
     sensed = _king_moved(_CASTLE_FEN, chess.A1, chess.A5)  # rook wandered off
     gd = compute_guidance(g, sensed, fixing=None)
     assert gd.alert
+
+
+# The real incident this guards against: the player made a legal king move (e2-d2)
+# while a knight had fallen off b6. Two changes at once read as INVALID, and the
+# old "lowest square index first" ranking lit d2 -- a correctly occupied square,
+# with the actual gap left dark and unexplainable to the player.
+_KNIGHT_OFF_BOARD = "r1b1k2r/1p2qppp/pnn5/8/7P/1P2BPb1/P1P1K1P1/RN1Q1BNR w kq - 5 12"
+
+
+def test_missing_piece_is_lit_before_a_legally_moved_one():
+    g = _game(_KNIGHT_OFF_BOARD, GameState.PLAYER_TURN)
+    sensed = chess.Board(_KNIGHT_OFF_BOARD)
+    pm = sensed.piece_map()
+    del pm[chess.B6]                                   # knight knocked off the board
+    del pm[chess.E2]
+    pm[chess.D2] = chess.Piece(chess.KING, chess.WHITE)  # legal Ke2-d2 played
+    sensed.set_piece_map(pm)
+
+    gd = compute_guidance(g, sensed)
+
+    assert gd.highlight == [chess.B6]                  # the gap, not the moved king
+    assert gd.alert
+    assert "schwarzer Springer" in gd.instruction
+
+
+def test_displaced_piece_is_not_reported_as_missing():
+    """A piece merely on the wrong square explains its own empty home square, so
+    the old lift-then-place flow must be untouched."""
+    g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
+    sensed = chess.Board()
+    pm = sensed.piece_map()
+    del pm[chess.B1]
+    pm[chess.B3] = chess.Piece(chess.KNIGHT, chess.WHITE)   # displaced, still on board
+    sensed.set_piece_map(pm)
+
+    gd = compute_guidance(g, sensed)
+
+    assert gd.highlight == [chess.B3]                  # lift the misplaced piece
+    assert gd.instruction == "Hebe die leuchtende Figur an."
+
+
+def test_piece_in_hand_alone_is_still_ordinary_play():
+    """Nothing *wrong* on the board -> a lifted piece must not be reported as a
+    missing one (that would alarm on every normal move)."""
+    g = _game(chess.STARTING_FEN, GameState.PLAYER_TURN)
+    sensed = chess.Board()
+    pm = sensed.piece_map()
+    del pm[chess.E2]                                   # pawn in hand, mid-move
+    sensed.set_piece_map(pm)
+
+    gd = compute_guidance(g, sensed)
+
+    assert gd.status == "Du bist am Zug"
+    assert not gd.alert

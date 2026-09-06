@@ -396,3 +396,45 @@ def test_runner_resumes_saved_game(tmp_path):
     runner = Runner(MockBoard(), ConfigWatcher(str(cfg)))
     assert runner._game.board.fen() == b.fen()
     assert runner._game.state == GameState.PLAYER_TURN
+
+
+# Real incident: the 300s escape hatch adopted the board after a knight fell off
+# and silently reset "kq - 5 12" to "- - 0 1" -- Black lost a castle it had never
+# forfeited, and the fifty-move clock started over.
+_MIDGAME = "r1b1k2r/1p2qppp/pnn5/8/7P/1P2BPb1/P1P1K1P1/RN1Q1BNR w kq - 5 12"
+
+
+def test_accept_position_keeps_castling_rights_and_counters():
+    g = ChessGame(human_color=chess.WHITE)
+    g.board = chess.Board(_MIDGAME)
+    g.state = GameState.PLAYER_TURN
+    sensed = chess.Board(_MIDGAME)
+    pm = sensed.piece_map()
+    del pm[chess.B6]                                   # the knight that fell off
+    sensed.set_piece_map(pm)
+
+    assert g.accept_position(sensed).message           # adopted
+
+    assert g.board.has_kingside_castling_rights(chess.BLACK)
+    assert g.board.has_queenside_castling_rights(chess.BLACK)
+    assert not g.board.has_kingside_castling_rights(chess.WHITE)   # was already gone
+    assert g.board.halfmove_clock == 5
+    assert g.board.fullmove_number == 12
+
+
+def test_accept_position_drops_rights_the_position_cannot_support():
+    """A rook that is no longer on its corner must not keep its castling right --
+    an inconsistent set would make the adopted board invalid."""
+    g = ChessGame(human_color=chess.WHITE)
+    g.board = chess.Board(_MIDGAME)
+    g.state = GameState.PLAYER_TURN
+    sensed = chess.Board(_MIDGAME)
+    pm = sensed.piece_map()
+    pm[chess.B8] = pm.pop(chess.A8)                    # black queenside rook moved off a8
+    sensed.set_piece_map(pm)
+
+    assert g.accept_position(sensed).message           # still adopted
+
+    assert g.board.has_kingside_castling_rights(chess.BLACK)       # h8 rook untouched
+    assert not g.board.has_queenside_castling_rights(chess.BLACK)  # a8 rook gone
+    assert g.board.is_valid()
