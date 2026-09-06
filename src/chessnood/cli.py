@@ -270,7 +270,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
                 mid, [chess.G1, chess.F3], detail="Computer: Stufe 5"),
         UiModel(ConnectionState.CONNECTED, "Schach!",
                 "Dein König steht im Schach. Du musst ihn retten.",
-                checked, [chess.E1, chess.H4], detail="Computer: Stufe 5"),
+                checked, [chess.E1, chess.F2, chess.G3, chess.H4],
+                detail="Computer: Stufe 5"),
     ]
     frames = [render(s) for s in samples]
     gap = 12

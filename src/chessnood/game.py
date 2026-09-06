@@ -425,6 +425,13 @@ def _plan_recovery(sensed: chess.Board, target: chess.Board,
     if wrong:
         displaced = Counter(smap[sq].symbol() for sq in wrong)
         for sq in missing:
+            if sq in smap:
+                # Not a gap: something else is standing there and has to come off
+                # first, which the wrong-piece branch below already handles. A
+                # capture mid-execution looks exactly like this -- the captured man
+                # still on the destination while the capturer is in the hand -- and
+                # "place it on the lit square" would point at an occupied square.
+                continue
             symbol = tmap[sq].symbol()
             if displaced[symbol]:
                 displaced[symbol] -= 1     # that piece is merely on the wrong square
@@ -548,17 +555,35 @@ def _engine_move_guidance(game: chess.Board, move: chess.Move) -> tuple[list[int
 def _player_turn_guidance(board: chess.Board) -> Guidance:
     """"Your move" -- or, in check, the one thing the player has to be told.
 
-    Light the attacked king together with whatever attacks it: the LEDs are where
-    he is already looking, and they say *which* piece is the threat without a word
-    of notation. Not an ``alert`` -- being in check is legal play, and flagging it
-    as a fault would beep the error tone and arm the accept-the-position timer.
+    Light the whole line of attack -- attacker, the squares it passes through, and
+    the king -- because the LEDs are where he is already looking, and a line says
+    *where the danger comes from* (and where he could block it) without a word of
+    notation, which he cannot read.
+
+    The shape carries the meaning, and it has to differ from the one shape the
+    board already uses: a computer move lights exactly TWO squares, from and to.
+    Lighting king + attacker was also two squares, and in the first live game the
+    player lifted the attacking queen -- reading the pair as "move this there". A
+    line is three squares or more, so it can never be mistaken for a move. Where
+    no line exists (a knight, or an attacker standing right next to the king) we
+    light the king ALONE rather than fall back to an ambiguous pair.
+
+    Not an ``alert`` -- being in check is legal play, and flagging it as a fault
+    would beep the error tone and arm the accept-the-position timer.
     """
     if not board.is_check():
         return Guidance("Du bist am Zug", "Mach deinen Zug auf dem Brett.")
     king = board.king(board.turn)
-    squares = sorted({king, *board.checkers()} - {None})
+    if king is None:                                  # not a playable position
+        return Guidance("Du bist am Zug", "Mach deinen Zug auf dem Brett.")
+    squares = {king}
+    for attacker in board.checkers():
+        between = chess.SquareSet.between(attacker, king)
+        if between:                                   # a slider at a distance
+            squares |= set(between)
+            squares.add(attacker)
     return Guidance("Schach!", "Dein König steht im Schach. Du musst ihn retten.",
-                    squares, check=True)
+                    sorted(squares), check=True)
 
 
 def compute_guidance(game: "ChessGame", sensed: chess.Board,

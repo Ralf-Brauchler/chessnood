@@ -276,20 +276,6 @@ class Runner:
         """Carry out a game Reaction: recompute guidance, drive LEDs/screen, run engine."""
         if reaction.message:
             log.info("%s", reaction.message)
-        if reaction.invalid:
-            # Record WHAT the board reported, not just that it was unmatched: this
-            # appliance cannot be inspected in person, so the sensed position is the
-            # only way to tell a piece that fell off from a real misplacement. Logged
-            # once per distinct position -- brief unmatched readings are normal
-            # mid-move, but a stuck one then leaves exactly one line to read.
-            fen = self._sensed.board_fen()
-            if fen != self._last_invalid_fen:
-                self._last_invalid_fen = fen
-                log.info("Board matches no legal move; sensed %s, expected %s",
-                         fen, self._game.board.board_fen())
-        else:
-            self._last_invalid_fen = None
-
         # Strength picked on the board: persist it before we redraw, so the screen's
         # strength line and the engine reflect the new level immediately.
         if reaction.select_skill is not None:
@@ -298,6 +284,20 @@ class Runner:
         # Work out what to show/say and which squares to light, then apply it to
         # the board LEDs (primary move indicator) and the screen together.
         await self._apply_guidance(beep=True)
+        # Record WHAT the board reported whenever the appliance is actually
+        # complaining: it cannot be inspected in person, so the sensed position is
+        # the only way to tell a piece that fell off from a real misplacement.
+        # Keyed on the complaint, not on "matches no legal move" -- a piece in the
+        # hand matches none either, and logging those buried the real cases under
+        # one line per computer move. Latched to one line per distinct position.
+        if self._ui.alert:
+            fen = self._sensed.board_fen()
+            if fen != self._last_invalid_fen:
+                self._last_invalid_fen = fen
+                log.info("Board flagged wrong (%s); sensed %s, expected %s",
+                         self._ui.status, fen, self._game.board.board_fen())
+        else:
+            self._last_invalid_fen = None
         if reaction.message:
             self._publish_status(state=self._game.state.name, last_move=reaction.message)
         self._save_game()

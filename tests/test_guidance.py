@@ -363,14 +363,28 @@ def test_piece_in_hand_alone_is_still_ordinary_play():
 _IN_CHECK = "4k3/8/8/8/7b/8/6P1/4K3 w - - 0 1"        # Bh4 checks the white Ke1
 
 
-def test_check_lights_the_king_and_its_attacker():
+def test_check_lights_the_whole_line_of_attack():
     g = _game(_IN_CHECK, GameState.PLAYER_TURN)
     gd = compute_guidance(g, chess.Board(_IN_CHECK))
 
     assert gd.status == "Schach!"
-    assert gd.highlight == [chess.E1, chess.H4]
+    assert gd.highlight == [chess.E1, chess.F2, chess.G3, chess.H4]
     assert gd.check
     assert not gd.alert          # check is legal play, not a position to fix
+
+
+def test_check_never_lights_exactly_two_squares():
+    """Two lit squares is the board's word for "the computer moves from here to
+    there" -- in the first live game the player lifted the attacking queen when
+    check showed king + attacker. A knight has no line, so the king lights alone."""
+    for fen in ("4k3/8/8/8/8/5n2/8/4K3 w - - 0 1",      # Nf3+ -- no line at all
+                "4k3/8/8/8/8/8/3p4/4K3 w - - 0 1"):     # pawn d2+, right alongside
+        g = _game(fen, GameState.PLAYER_TURN)
+        gd = compute_guidance(g, chess.Board(fen))
+
+        assert gd.status == "Schach!"
+        assert gd.highlight == [chess.E1]               # the king, and nothing else
+        assert len(gd.highlight) != 2
 
 
 def test_check_stays_lit_while_a_piece_is_in_hand():
@@ -384,7 +398,7 @@ def test_check_stays_lit_while_a_piece_is_in_hand():
     gd = compute_guidance(g, sensed)
 
     assert gd.status == "Schach!"
-    assert gd.highlight == [chess.E1, chess.H4]
+    assert gd.highlight == [chess.E1, chess.F2, chess.G3, chess.H4]
 
 
 def test_a_wrong_position_outranks_the_check_signal():
@@ -417,3 +431,18 @@ def test_no_check_signal_in_a_quiet_position():
 
     assert gd.status == "Du bist am Zug"
     assert not gd.check and gd.highlight == []
+
+
+def test_capture_in_progress_asks_to_clear_the_square_first():
+    """Live at 12:46:21: executing Nxd5, knight in hand, the captured pawn still on
+    d5. d5 is a gap AND occupied, and "place it on the lit square" pointed at an
+    occupied square. The captured man has to come off first."""
+    before = chess.Board("rnbqkb1r/1pp2ppp/p4n2/3Pp3/8/3P1P1P/PPP3P1/RNBQKBNR b kq - 0 1")
+    g = _game(before.fen(), GameState.ENGINE_MOVE_SHOWN, "f6d5")
+    sensed = chess.Board("rnbqkb1r/1pp2ppp/p7/3Pp3/8/3P1P1P/PPP3P1/RNBQKBNR b kq - 0 1")
+
+    gd = compute_guidance(g, sensed)
+
+    assert gd.highlight == [chess.D5]
+    assert gd.instruction == "Nimm die Figur vom Brett."
+    assert "fehlt" not in gd.instruction

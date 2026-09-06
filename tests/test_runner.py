@@ -300,43 +300,63 @@ def _feed(r, sensed: chess.Board):
     asyncio.run(r._apply(r._game.feed(reading)))
 
 
-def test_unmatched_reading_logs_the_sensed_position(tmp_path, caplog):
+def _misplaced() -> chess.Board:
+    """The start position with the b1 knight set down on b3 -- not a legal move,
+    and a genuinely wrong board, so the appliance complains about it."""
+    b = chess.Board()
+    pm = b.piece_map()
+    pm[chess.B3] = pm.pop(chess.B1)
+    b.set_piece_map(pm)
+    return b
+
+
+def _flagged(caplog):
+    return [rec.getMessage() for rec in caplog.records if "flagged wrong" in rec.getMessage()]
+
+
+def test_a_flagged_position_logs_what_the_board_reported(tmp_path, caplog):
     """Without the sensed FEN in the journal, a stuck board is undiagnosable on a
     device nobody can inspect in person."""
     r = _runner(tmp_path)
     r._game.state = GameState.PLAYER_TURN
-    sensed = chess.Board()
-    pm = sensed.piece_map()
-    del pm[chess.B1]
-    del pm[chess.G1]                       # two pieces gone -> matches no legal move
-    sensed.set_piece_map(pm)
+    sensed = _misplaced()
 
     with caplog.at_level("INFO", logger="chessnood.runner"):
         _feed(r, sensed)
 
-    lines = [rec.getMessage() for rec in caplog.records if "no legal move" in rec.getMessage()]
-    assert len(lines) == 1
-    assert sensed.board_fen() in lines[0]
-    assert chess.Board().board_fen() in lines[0]       # and what was expected
+    assert len(_flagged(caplog)) == 1
+    assert sensed.board_fen() in _flagged(caplog)[0]
+    assert chess.Board().board_fen() in _flagged(caplog)[0]       # and what was expected
 
 
-def test_repeated_unmatched_readings_log_once(tmp_path, caplog):
+def test_a_piece_in_hand_is_not_logged(tmp_path, caplog):
+    """A lifted piece matches no legal move either, but it is normal play. Logging
+    it buried the real cases under one line per computer move."""
     r = _runner(tmp_path)
     r._game.state = GameState.PLAYER_TURN
     sensed = chess.Board()
     pm = sensed.piece_map()
-    del pm[chess.B1]
-    del pm[chess.G1]
+    del pm[chess.E2]                       # pawn in hand, mid-move
     sensed.set_piece_map(pm)
 
     with caplog.at_level("INFO", logger="chessnood.runner"):
         _feed(r, sensed)
-        _feed(r, sensed.copy())            # same wrong position, still sitting there
-        _feed(r, chess.Board())            # corrected -> latch clears
-        _feed(r, sensed.copy())            # wrong again -> reported again
 
-    lines = [rec.getMessage() for rec in caplog.records if "no legal move" in rec.getMessage()]
-    assert len(lines) == 2
+    assert _flagged(caplog) == []
+
+
+def test_a_position_left_wrong_logs_once(tmp_path, caplog):
+    r = _runner(tmp_path)
+    r._game.state = GameState.PLAYER_TURN
+    sensed = _misplaced()
+
+    with caplog.at_level("INFO", logger="chessnood.runner"):
+        _feed(r, sensed)
+        _feed(r, _misplaced())             # same wrong position, still sitting there
+        _feed(r, chess.Board())            # corrected -> latch clears
+        _feed(r, _misplaced())             # wrong again -> reported again
+
+    assert len(_flagged(caplog)) == 2
 
 
 # Real incident: after a restart mid-game the screen showed "Das passt nicht" and
