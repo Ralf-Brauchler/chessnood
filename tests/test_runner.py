@@ -412,3 +412,28 @@ def test_status_state_tracks_the_game_without_a_move(tmp_path):
     r._game.state = GameState.PLAYER_TURN
     r._publish_status()                       # e.g. the periodic heartbeat
     assert json.loads((tmp_path / "s.json").read_text())["state"] == "PLAYER_TURN"
+
+
+def test_skill_selection_never_writes_a_stale_screen_snapshot(tmp_path):
+    """Picking a strength on the board used to publish the status *before* the
+    guidance was recomputed, pairing the new game state with the previous
+    headline -- a remote look then showed NEED_SETUP next to "Du bist am Zug"."""
+    async def run():
+        r = _runner(tmp_path, extra="engine:\n  skill_level: 5\n")
+        r._connection = ConnectionState.CONNECTED
+        r._game.state = GameState.PLAYER_TURN
+        r._recompute_guidance()                       # headline is now "Du bist am Zug"
+
+        # the settings gesture: white king lifted off e1 onto b4 -> level 2
+        sensed = chess.Board()
+        pm = sensed.piece_map()
+        pm[chess.B4] = pm.pop(chess.E1)
+        sensed.set_piece_map(pm)
+        r._sensed = sensed                            # as _show_sensed does live
+        await r._apply(r._game.feed(BoardReading(pm)))
+
+        data = json.loads((tmp_path / "s.json").read_text())
+        assert data["state"] == "NEED_SETUP"
+        assert data["status"] == "Spielstärke wählen"      # not the stale headline
+        assert data["skill_level"] == 2                    # follows the config watcher
+    asyncio.run(run())

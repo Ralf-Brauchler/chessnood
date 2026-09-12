@@ -118,7 +118,7 @@ class Runner:
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._recompute_guidance()
-        self._publish_status(skill_level=self._watcher.current.engine.skill_level)
+        self._publish_status()
         self._refresh_screen()
         readings = self._board.subscribe_readings()
         states = self._board.subscribe_state()
@@ -210,6 +210,7 @@ class Runner:
             # "starting" until the next committed move -- exactly when a remote look
             # at the appliance matters most.
             "state": self._game.state.name,
+            "skill_level": self._watcher.current.engine.skill_level,
             "status": model.status,
             "instruction": model.instruction,
             "fen": model.board.fen() if model.board is not None else None,
@@ -429,7 +430,9 @@ class Runner:
         cfg = self._watcher.reload()                 # adopt our own write deterministically
         self._engine.configure(cfg.engine)
         log.info("Strength set from the board: skill_level=%s", skill)
-        self._publish_status(skill_level=skill)
+        # No status write here: the screen snapshot has not been recomputed yet, so
+        # it would pair the NEW game state with the OLD headline. The caller
+        # publishes right after, once the guidance is up to date.
         if self._beeps:
             await self._board.beep(900 + skill * 90, 90)
 
