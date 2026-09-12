@@ -516,6 +516,41 @@ def _partial_multistep_move(board: chess.Board, sensed: chess.Board) -> chess.Mo
     return None
 
 
+# Status + instruction for "the player is a half-move ahead" (see _player_move_ahead).
+_AHEAD = ("Der Computer ist noch dran",
+          "Du hast schon geantwortet. Nimm deinen Zug zurück und führe zuerst den "
+          "leuchtenden Zug des Computers aus.")
+
+
+def _player_move_ahead(board: chess.Board, move: chess.Move,
+                       sensed: chess.Board) -> chess.Move | None:
+    """If ``sensed`` is the position after the player has already answered the
+    computer's still-unexecuted ``move``, return that answer -- else ``None``.
+
+    The board never passes through the computer's move: the player takes the
+    computer's piece off, puts his own capturing piece on the destination in the
+    same breath, and the position jumps straight to "both moves played". It is a
+    wrong position, but not a misplaced piece -- he is simply a half-move ahead,
+    and telling him "Das passt nicht" leaves him hunting for a fault that isn't
+    there (a real game got stuck on exactly this).
+
+    No false positives from an ordinary fumble: a match requires the computer's
+    piece to be on its correct destination *and* one of the player's own pieces to
+    have made a legal move. A misplaced computer piece leaves its destination
+    empty, so it can never match.
+    """
+    after = board.copy(stack=False)
+    after.push(move)
+    smap = sensed.piece_map()
+    for reply in after.legal_moves:
+        after.push(reply)
+        matched = after.piece_map() == smap
+        after.pop()
+        if matched:
+            return reply
+    return None
+
+
 def _partial_move_guidance(board: chess.Board, sensed: chess.Board,
                            move: chess.Move) -> tuple[list[int], str]:
     """Squares to light and a plain instruction to *finish* a half-done castling or
@@ -655,6 +690,14 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
         if sensed.piece_map() == expected.piece_map():
             return Guidance("Der Computer hat gezogen", "Der Zug ist ausgeführt.")
 
+        # The player answered before executing the computer's move: his own reply is
+        # already on the board. The position is wrong, but nothing is *misplaced* --
+        # so the wrong-position wording below would send him hunting for a fault
+        # that isn't there. Say what actually happened instead, and (for a simple
+        # move) guide his own piece back rather than the computer's.
+        ahead_reply = _player_move_ahead(board, move, sensed)
+        ahead = ahead_reply is not None
+
         # En passant / castling / promotion: light all involved squares at once
         # (rare and interlocking; sequencing them is a later phase).
         if _needs_all_leds(board, move):
@@ -662,22 +705,37 @@ def compute_guidance(game: "ChessGame", sensed: chess.Board,
             executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
             if executing:
                 return Guidance("Der Computer hat gezogen", instr, involved)
-            return Guidance("Fast — bitte den leuchtenden Zug ausführen", instr, involved, alert=True)
+            return Guidance(*(_AHEAD if ahead else
+                              ("Fast — bitte den leuchtenden Zug ausführen", instr)),
+                            involved, alert=True)
 
         # Simple move or normal capture: guide the computer's piece one square at a
         # time -- lift the mover (source lit), then the destination (a piece sitting
         # there is simply taken off). If it's set down on the WRONG square, that
         # square lights until it's lifted, then the correct destination. Seed the
         # (from,to) pairing so this survives a lost fixing state (e.g. a restart).
-        seed = fixing if fixing is not None else (move.from_square, move.to_square)
+        engine_seed = (move.from_square, move.to_square)
+        # A player who is a half-move ahead holds his OWN piece, not the computer's.
+        # Seeding with the computer's move would light the computer's destination --
+        # the very square he has to clear -- and he would put the piece back where it
+        # already was, round and round. Seed with his reply reversed instead: lift it,
+        # then put it home. Once that cleanup is done it yields nothing, and we hand
+        # back to the computer's own move below.
+        if ahead_reply is not None:
+            seed = (ahead_reply.to_square, ahead_reply.from_square)
+        else:
+            seed = fixing if fixing is not None else engine_seed
         hl, instr, _plan_alert, new_fixing = _plan_recovery(sensed, expected, seed)
+        if not hl and seed != engine_seed:
+            hl, instr, _plan_alert, new_fixing = _plan_recovery(sensed, expected, engine_seed)
         if not hl:
             return Guidance("Der Computer hat gezogen", "Der Zug ist ausgeführt.")
         executing = _is_lift_of(sensed, board) or _is_lift_of(sensed, expected)
         if executing:                                  # on track -> calm guidance
             return Guidance("Der Computer hat gezogen", instr, hl, fixing=new_fixing)
-        return Guidance("Fast — bitte den leuchtenden Zug ausführen", instr, hl,
-                        target=expected, alert=True, fixing=new_fixing)
+        return Guidance(*(_AHEAD if ahead else
+                          ("Fast — bitte den leuchtenden Zug ausführen", instr)),
+                        hl, target=expected, alert=True, fixing=new_fixing)
 
     if state == GameState.GAME_OVER:
         return Guidance(_result_text_for(board),
