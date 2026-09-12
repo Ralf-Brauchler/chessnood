@@ -438,3 +438,68 @@ def test_accept_position_drops_rights_the_position_cannot_support():
     assert g.board.has_kingside_castling_rights(chess.BLACK)       # h8 rook untouched
     assert not g.board.has_queenside_castling_rights(chess.BLACK)  # a8 rook gone
     assert g.board.is_valid()
+
+
+def test_answering_before_executing_books_both_moves():
+    """The real case from a game at my father's: the computer played d7-d5 and he
+    captured it with exd5 in one motion, so the board jumped straight to the
+    position after both moves -- and that position is entirely correct. Book both
+    and play on instead of making him undo a move he is entitled to."""
+    before = "1rb2k1r/pp1p1ppp/1q6/2n1p3/2B1P3/2P2P1N/P2PK1PP/R6R b - - 0 18"
+    game = ChessGame(human_color=chess.WHITE)
+    game.board = chess.Board(before)
+    game.state = GameState.PLAYER_TURN
+    game.feed(reading_of(chess.Board(before)))          # nothing changed -> no-op
+    game.set_engine_move(chess.Move.from_uci("d7d5"))
+    assert game.state == GameState.ENGINE_MOVE_SHOWN
+
+    both = chess.Board(before)
+    both.push_uci("d7d5")
+    both.push_uci("e4d5")
+    react = game.feed(reading_of(both))
+
+    assert game.board.board_fen() == both.board_fen()   # both moves on the record
+    assert [m.uci() for m in game.board.move_stack] == ["d7d5", "e4d5"]
+    assert game.pending_engine_move is None
+    assert game.state == GameState.ENGINE_THINKING
+    assert react.engine_should_move and not react.invalid
+    assert "d5" in react.message and "exd5" in react.message
+
+
+def test_answering_before_executing_can_end_the_game():
+    """If the player's skipped-ahead reply is mate, the game ends there -- it must
+    not be left waiting for an engine move that can never come."""
+    # black to move; Qh4 is answered by ... the player's own mate on the back rank
+    before = "6k1/5ppp/8/8/8/8/5PPP/R5K1 b - - 0 1"
+    game = ChessGame(human_color=chess.WHITE)
+    game.board = chess.Board(before)
+    game.state = GameState.PLAYER_TURN
+    game.set_engine_move(chess.Move.from_uci("g8h8"))   # computer shuffles the king
+
+    both = chess.Board(before)
+    both.push_uci("g8h8")
+    both.push_uci("a1a8")                               # Ra8#
+    assert both.is_checkmate()
+    react = game.feed(reading_of(both))
+
+    assert game.state == GameState.GAME_OVER
+    assert not react.engine_should_move
+    assert "1-0" in react.message
+
+
+def test_a_fumbled_computer_piece_is_not_booked_as_two_moves():
+    """Guard the adoption: the computer's piece set down on the wrong square must
+    stay a flagged wrong position, never be read as 'he already answered'."""
+    game = ChessGame(human_color=chess.WHITE)
+    game.feed(reading_of(chess.Board()))
+    b = chess.Board(); b.push_uci("e2e4"); game.feed(reading_of(b))
+    game.set_engine_move(chess.Move.from_uci("e7e5"))
+
+    wrong = b.copy()
+    pm = wrong.piece_map(); pm[chess.E6] = pm.pop(chess.E7)   # e7 pawn landed on e6
+    wrong.set_piece_map(pm)
+    react = game.feed(reading_of(wrong))
+
+    assert react.invalid
+    assert game.state == GameState.ENGINE_MOVE_SHOWN
+    assert game.pending_engine_move is not None

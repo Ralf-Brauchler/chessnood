@@ -448,28 +448,25 @@ def test_capture_in_progress_asks_to_clear_the_square_first():
     assert "fehlt" not in gd.instruction
 
 
-def test_player_ahead_of_the_computer_says_so():
+def test_player_ahead_is_shown_calmly_not_as_a_fault():
     """From a real game: the computer played d7-d5, the player took the black pawn
-    off and put his own capturing pawn on d5 in one go. The board never showed the
-    computer's move, so the position is wrong -- but nothing is *misplaced*, and
-    "Das passt nicht" sent him hunting for a fault that wasn't there."""
+    off and put his own capturing pawn on d5 in one go. The game logic books both
+    moves, so the screen must not alarm or demand an undo in the meantime."""
     before = "1rb2k1r/pp1p1ppp/1q6/2n1p3/2B1P3/2P2P1N/P2PK1PP/R6R b - - 0 18"
     g = _game(before, GameState.ENGINE_MOVE_SHOWN, pending="d7d5")
 
     sensed = chess.Board(before)
-    sensed.push_uci("d7d5")      # the computer's move ...
-    sensed.push_uci("e4d5")      # ... and the player's reply, both on the board
+    sensed.push_uci("d7d5"); sensed.push_uci("e4d5")
 
     gd = compute_guidance(g, sensed)
-    assert gd.status == "Der Computer ist noch dran"
-    assert "schon geantwortet" in gd.instruction
-    assert gd.alert                      # still needs fixing -> beep + remote log
-    assert gd.highlight                  # LEDs keep guiding back to the computer's move
+    assert gd.status == "Beide Züge übernommen"
+    assert not gd.alert                   # no beep, no accept-timer, no "Das passt nicht"
+    assert gd.highlight == []             # nothing left to do on the board
 
 
-def test_misplaced_computer_piece_is_not_read_as_being_ahead():
-    """Guard the new branch: setting the computer's piece down on the wrong square
-    must stay an ordinary one-piece correction, not 'you are a move ahead'."""
+def test_misplaced_computer_piece_still_alerts():
+    """Guard: setting the computer's piece down on the wrong square must stay an
+    ordinary one-piece correction, not be mistaken for being a move ahead."""
     after_e4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
     g = _game(after_e4, GameState.ENGINE_MOVE_SHOWN, pending="e7e5")
     wrong = chess.Board(after_e4)
@@ -477,69 +474,17 @@ def test_misplaced_computer_piece_is_not_read_as_being_ahead():
     wrong.set_piece_map(pm)
 
     gd = compute_guidance(g, wrong)
-    assert gd.status != "Der Computer ist noch dran"
+    assert gd.status != "Beide Züge übernommen"
     assert gd.alert and gd.highlight == [chess.E6]
 
 
 def test_lifting_the_computers_piece_is_not_read_as_being_ahead():
-    """Mid-execution (piece in hand) must stay calm guidance."""
+    """Mid-execution (piece in hand) must stay calm guidance towards the move."""
     after_e4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
     g = _game(after_e4, GameState.ENGINE_MOVE_SHOWN, pending="e7e5")
     lifted = chess.Board(after_e4)
     pm = lifted.piece_map(); del pm[chess.E7]; lifted.set_piece_map(pm)
 
     gd = compute_guidance(g, lifted)
-    assert gd.status != "Der Computer ist noch dran"
+    assert gd.status != "Beide Züge übernommen"
     assert not gd.alert and gd.highlight == [chess.E5]
-
-
-def test_player_ahead_after_engine_castling_keeps_all_leds():
-    """The 'you are a half-move ahead' wording also covers the interlocking moves
-    (castling / en passant / promotion) -- but there it must not change which
-    squares light: those still go on all at once."""
-    fen = "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1"
-    g = _game(fen, GameState.ENGINE_MOVE_SHOWN, pending="e8g8")
-
-    sensed = chess.Board(fen)
-    sensed.push_uci("e8g8")      # the computer's castling ...
-    sensed.push_uci("a1a2")      # ... and the player's reply, both on the board
-
-    gd = compute_guidance(g, sensed)
-    assert gd.status == "Der Computer ist noch dran"
-    assert gd.alert
-    assert {chess.E8, chess.G8, chess.H8, chess.F8} <= set(gd.highlight)
-
-
-def test_player_ahead_is_guided_back_without_looping():
-    """The whole point of the message: the LEDs must lead somewhere. Seeded with
-    the computer's move the cleanup lit the computer's destination -- the square
-    the player has to clear -- so he put his pawn back on it, round and round."""
-    before = "1rb2k1r/pp1p1ppp/1q6/2n1p3/2B1P3/2P2P1N/P2PK1PP/R6R b - - 0 18"
-    g = _game(before, GameState.ENGINE_MOVE_SHOWN, pending="d7d5")
-
-    sensed = chess.Board(before)
-    sensed.push_uci("d7d5"); sensed.push_uci("e4d5")
-
-    # 1. both moves on the board -> lift the player's own pawn off d5
-    gd = compute_guidance(g, sensed)
-    assert gd.status == "Der Computer ist noch dran" and gd.highlight == [chess.D5]
-
-    # 2. lifted -> light e4, where that pawn belongs (NOT d5 again)
-    s1 = sensed.copy()
-    pm = s1.piece_map(); del pm[chess.D5]; s1.set_piece_map(pm)
-    gd = compute_guidance(g, s1, fixing=gd.fixing)
-    assert gd.highlight == [chess.E4]
-
-    # 3. pawn home -> hand back to the computer's move: d5 lights for the black pawn
-    s2 = s1.copy()
-    pm = s2.piece_map(); pm[chess.E4] = chess.Piece(chess.PAWN, chess.WHITE)
-    s2.set_piece_map(pm)
-    gd = compute_guidance(g, s2, fixing=gd.fixing)
-    assert gd.highlight == [chess.D5]
-
-    # 4. black pawn placed -> done
-    s3 = s2.copy()
-    pm = s3.piece_map(); pm[chess.D5] = chess.Piece(chess.PAWN, chess.BLACK)
-    s3.set_piece_map(pm)
-    gd = compute_guidance(g, s3, fixing=gd.fixing)
-    assert gd.highlight == [] and gd.status == "Der Computer hat gezogen"
