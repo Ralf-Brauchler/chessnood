@@ -118,7 +118,7 @@ class Runner:
     async def run(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._recompute_guidance()
-        self._publish_status(state="starting", skill_level=self._watcher.current.engine.skill_level)
+        self._publish_status(skill_level=self._watcher.current.engine.skill_level)
         self._refresh_screen()
         readings = self._board.subscribe_readings()
         states = self._board.subscribe_state()
@@ -205,6 +205,11 @@ class Runner:
         model = self._current_model()
         fields = {
             "connection": model.connection.value,
+            # Always the live game state. It used to be passed in only by the two
+            # callers that knew it, so after a restart the file kept saying
+            # "starting" until the next committed move -- exactly when a remote look
+            # at the appliance matters most.
+            "state": self._game.state.name,
             "status": model.status,
             "instruction": model.instruction,
             "fen": model.board.fen() if model.board is not None else None,
@@ -299,7 +304,7 @@ class Runner:
         else:
             self._last_invalid_fen = None
         if reaction.message:
-            self._publish_status(state=self._game.state.name, last_move=reaction.message)
+            self._publish_status(last_move=reaction.message)
         self._save_game()
         self._arm_accept_timer()
 

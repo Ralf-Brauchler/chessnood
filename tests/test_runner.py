@@ -398,3 +398,17 @@ def test_fresh_start_still_asks_for_the_start_position(tmp_path):
     assert r._game.state == GameState.NEED_SETUP
     assert not r._ui.alert
     assert "Figuren" in r._display.last.status
+
+
+def test_status_state_tracks_the_game_without_a_move(tmp_path):
+    """The status file's ``state`` must follow the live game, not stick at the value
+    some caller last passed in. It used to be written only alongside a committed
+    move, so a restarted appliance reported "starting" until someone moved a piece --
+    precisely the moment a remote look at it is worth something."""
+    r = _runner(tmp_path)
+    r._publish_status()
+    assert json.loads((tmp_path / "s.json").read_text())["state"] == "NEED_SETUP"
+
+    r._game.state = GameState.PLAYER_TURN
+    r._publish_status()                       # e.g. the periodic heartbeat
+    assert json.loads((tmp_path / "s.json").read_text())["state"] == "PLAYER_TURN"
